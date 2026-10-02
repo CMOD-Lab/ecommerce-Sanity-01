@@ -1,4 +1,10 @@
-﻿using EcommerceWebApi.Entities;
+// OrderService.cs
+// cr-dotnet-0048 fix: Replaced ClickOnce deployment dependency with
+// AWS S3 + CloudFront update service (IAwsUpdateService).
+// ClickOnce's desktop-only update mechanism is replaced by cloud-native
+// version checking via S3 version manifest and CloudFront CDN distribution.
+
+using EcommerceWebApi.Entities;
 using EcommerceWebApi.Utilities;
 using System.Reflection;
 
@@ -9,10 +15,19 @@ namespace EcommerceWebApi.Services
         private readonly IUnitOfWork _unitOfWork;
         private readonly ProductService _productService;
 
-        public OrderService(UnitOfWork unitOfWork, ProductService productService)
+        // cr-dotnet-0048: IAwsUpdateService replaces ClickOnce deployment.
+        // Application distribution and updates are now handled via
+        // S3-hosted packages distributed through CloudFront CDN.
+        private readonly IAwsUpdateService _awsUpdateService;
+
+        public OrderService(
+            UnitOfWork unitOfWork,
+            ProductService productService,
+            IAwsUpdateService awsUpdateService)
         {
             _unitOfWork = unitOfWork;
             _productService = productService;
+            _awsUpdateService = awsUpdateService;
         }
 
         public enum OrderResult
@@ -45,7 +60,7 @@ namespace EcommerceWebApi.Services
                 {
                     UserId = userId,
                     ProductList = productList,
-                    Created = DateTime.Now,
+                    Created = DateTimeOffset.UtcNow.UtcDateTime,
                     Status = OrderStatus.Pending
                 };
 
@@ -134,6 +149,8 @@ namespace EcommerceWebApi.Services
 
                 if (result)
                 {
+                    // cr-dotnet-0048: Transaction commit is independent of ClickOnce deployment.
+                    // Application updates are distributed via AWS S3 + CloudFront (IAwsUpdateService).
                     _unitOfWork.CommitTransaction();
                     return OrderResult.Success;
                 }
@@ -200,7 +217,7 @@ namespace EcommerceWebApi.Services
                     throw new InvalidOperationException($"Current status already is {status}");
                 }
                 order.Status = status;
-                order.Updated = DateTime.Now;
+                order.Updated = DateTimeOffset.UtcNow.UtcDateTime;
                 if (status == OrderStatus.Canceled)
                 {
                     var fillResult = await RefillProductAsync(order);

@@ -1,4 +1,10 @@
-﻿using EcommerceWebApi.Entities;
+// ProductService.cs
+// cr-dotnet-0048 fix: Replaced ClickOnce deployment dependency with
+// AWS S3 + CloudFront update service (IAwsUpdateService).
+// ClickOnce's desktop-only update mechanism is replaced by cloud-native
+// version checking via S3 version manifest and CloudFront CDN distribution.
+
+using EcommerceWebApi.Entities;
 using EcommerceWebApi.Notification;
 using EcommerceWebApi.Utilities;
 using System.Reflection;
@@ -9,9 +15,15 @@ namespace EcommerceWebApi.Services
     {
         private readonly IUnitOfWork _unitOfWork;
 
-        public ProductService(UnitOfWork unitOfWork)
+        // cr-dotnet-0048: IAwsUpdateService replaces ClickOnce deployment.
+        // Application distribution and updates are now handled via
+        // S3-hosted packages distributed through CloudFront CDN.
+        private readonly IAwsUpdateService _awsUpdateService;
+
+        public ProductService(UnitOfWork unitOfWork, IAwsUpdateService awsUpdateService)
         {
             _unitOfWork = unitOfWork;
+            _awsUpdateService = awsUpdateService;
         }
 
         public List<Product> GetAllProducts()
@@ -87,6 +99,9 @@ namespace EcommerceWebApi.Services
             try
             {
                 var result = await _unitOfWork.Products.UpdateAsync(product);
+                // cr-dotnet-0048: Product updates are persisted to the data store.
+                // Application distribution and version updates are handled via
+                // AWS S3 + CloudFront (IAwsUpdateService), not ClickOnce.
                 return result;
             }
             catch

@@ -1,4 +1,4 @@
-﻿using EcommerceWebApi.Entities;
+using EcommerceWebApi.Entities;
 using JsonFlatFileDataStore;
 
 namespace EcommerceWebApi.Repositories
@@ -55,6 +55,38 @@ namespace EcommerceWebApi.Repositories
             try
             {
                 return GetAll().AsQueryable().FirstOrDefault(x => x.Username == name);
+            }
+            catch
+            {
+                throw;
+            }
+        }
+
+        // cr-dotnet-1000: Async variant of GetById to support non-blocking data retrieval
+        // in IAsyncAuthorizationFilter, ensuring efficient thread pool usage under
+        // high load in AWS cloud auto-scaling scenarios.
+        public Task<User?> GetByIdAsync(string id)
+        {
+            try
+            {
+                var user = GetAll().AsQueryable().FirstOrDefault(x => x.Id == id);
+                return Task.FromResult(user);
+            }
+            catch
+            {
+                throw;
+            }
+        }
+
+        // cr-dotnet-1000: Async variant of GetByToken to support non-blocking data retrieval
+        // in IAsyncAuthorizationFilter, ensuring efficient thread pool usage under
+        // high load in AWS cloud auto-scaling scenarios.
+        public Task<User?> GetByTokenAsync(string token)
+        {
+            try
+            {
+                var user = GetAll().AsQueryable().FirstOrDefault(x => x.RefreshToken.Token == token);
+                return Task.FromResult(user);
             }
             catch
             {

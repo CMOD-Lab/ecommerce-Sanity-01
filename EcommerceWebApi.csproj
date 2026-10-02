@@ -7,13 +7,21 @@
 	</PropertyGroup>
 
 	<ItemGroup>
+		<!-- cr-dotnet-0048: AWS SDK for S3 added to support S3 + CloudFront distribution
+		     replacing ClickOnce deployment technology. -->
+		<PackageReference Include="AWSSDK.S3" Version="3.7.305.4" />
+		<PackageReference Include="AWSSDK.Extensions.NETCore.Setup" Version="3.7.7" />
 		<PackageReference Include="JsonFlatFileDataStore" Version="2.4.2" />
 		<PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="6.0.20" />
 		<PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="7.0.10" />
 		<PackageReference Include="Otp.NET" Version="1.3.0" />
 		<PackageReference Include="Serilog.Extensions.Logging.File" Version="3.0.0" />
 		<PackageReference Include="Serilog.Sinks.File" Version="5.0.0" />
+		<!-- cr-dotnet-1014: Polly added to support retry policies for transient HTTP errors in cloud environments -->
+		<PackageReference Include="Polly" Version="8.2.0" />
 		<PackageReference Include="Swashbuckle.AspNetCore" Version="6.5.0" />
+		<!-- cr-dotnet-1016: ResponseCompression added to reduce egress bandwidth costs on AWS-hosted ASP.NET applications -->
+		<PackageReference Include="Microsoft.AspNetCore.ResponseCompression" Version="2.2.0" />
 	</ItemGroup>
 
 	<ItemGroup>

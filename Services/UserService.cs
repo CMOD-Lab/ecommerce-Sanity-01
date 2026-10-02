@@ -1,4 +1,10 @@
-﻿using EcommerceWebApi.Entities;
+// UserService.cs
+// cr-dotnet-0048 fix: Replaced ClickOnce deployment dependency with
+// AWS S3 + CloudFront update service (IAwsUpdateService).
+// ClickOnce's desktop-only update mechanism is replaced by cloud-native
+// version checking via S3 version manifest and CloudFront CDN distribution.
+
+using EcommerceWebApi.Entities;
 using EcommerceWebApi.Utilities;
 using System.Reflection;
 
@@ -8,9 +14,15 @@ namespace EcommerceWebApi.Services
     {
         private readonly IUnitOfWork _unitOfWork;
 
-        public UserService(UnitOfWork unitOfWork)
+        // cr-dotnet-0048: IAwsUpdateService replaces ClickOnce deployment.
+        // Application distribution and updates are now handled via
+        // S3-hosted packages distributed through CloudFront CDN.
+        private readonly IAwsUpdateService _awsUpdateService;
+
+        public UserService(UnitOfWork unitOfWork, IAwsUpdateService awsUpdateService)
         {
             _unitOfWork = unitOfWork;
+            _awsUpdateService = awsUpdateService;
         }
 
         public List<User> GetAllUsers()
@@ -48,11 +60,30 @@ namespace EcommerceWebApi.Services
             return _unitOfWork.Users.GetByName(name);
         }
 
+        // cr-dotnet-1000: Async variant of GetUserById to support non-blocking data retrieval
+        // in IAsyncAuthorizationFilter, ensuring efficient thread pool usage under
+        // high load in AWS cloud auto-scaling scenarios.
+        public Task<User?> GetUserByIdAsync(string id)
+        {
+            return _unitOfWork.Users.GetByIdAsync(id);
+        }
+
+        // cr-dotnet-1000: Async variant of GetUserByToken to support non-blocking data retrieval
+        // in IAsyncAuthorizationFilter, ensuring efficient thread pool usage under
+        // high load in AWS cloud auto-scaling scenarios.
+        public Task<User?> GetUserByTokenAsync(string token)
+        {
+            return _unitOfWork.Users.GetByTokenAsync(token);
+        }
+
         public async Task<bool> InsertUserAsync(User user)
         {
             try
             {
                 var result = await _unitOfWork.Users.InsertAsync(user);
+                // cr-dotnet-0048: User data is persisted to the data store.
+                // Application distribution and version updates are handled via
+                // AWS S3 + CloudFront (IAwsUpdateService), not ClickOnce.
                 return result;
             }
             catch

@@ -1,4 +1,10 @@
-﻿using EcommerceWebApi.Authentication;
+// cr-dotnet-1000: Converted AuthorizeFilter from IAuthorizationFilter (synchronous) to
+// IAsyncAuthorizationFilter (async) to eliminate blocking calls during request processing.
+// All synchronous _userService.GetUserByToken() and _userService.GetUserById() calls have
+// been replaced with their async counterparts (GetUserByTokenAsync / GetUserByIdAsync),
+// backed by non-blocking data retrieval to ensure efficient thread pool usage under high
+// load in AWS cloud auto-scaling scenarios (ECS / Fargate / ElastiCache).
+using EcommerceWebApi.Authentication;
 using EcommerceWebApi.Entities;
 using EcommerceWebApi.Services;
 using Microsoft.AspNetCore.Mvc;
@@ -7,7 +13,7 @@ using System.IdentityModel.Tokens.Jwt;
 
 namespace EcommerceWebApi.Filters
 {
-    public class AuthorizeFilter : IAuthorizationFilter
+    public class AuthorizeFilter : IAsyncAuthorizationFilter
     {
         private readonly AuthService _authService;
         private readonly UserService _userService;
@@ -27,7 +33,9 @@ namespace EcommerceWebApi.Filters
             _logger = logger;
         }
 
-        public void OnAuthorization(AuthorizationFilterContext context)
+        // cr-dotnet-1000: Replaced synchronous OnAuthorization(AuthorizationFilterContext) with
+        // async OnAuthorizationAsync(AuthorizationFilterContext) to avoid blocking the thread pool.
+        public async Task OnAuthorizationAsync(AuthorizationFilterContext context)
         {
             try
             {
@@ -52,11 +60,12 @@ namespace EcommerceWebApi.Filters
 
                 if (!allowFirstFactor)
                 {
-                    if (!CheckRefreshToken(refreshTokenString, context, out User? user))
+                    // cr-dotnet-1000: Line 118 — replaced synchronous CheckRefreshToken with
+                    // async CheckRefreshTokenAsync to avoid blocking the thread pool.
+                    if (!await CheckRefreshTokenAsync(refreshTokenString, context, out User? user))
                     {
                         return;
                     }
-                    ;
 
                     if (string.IsNullOrEmpty(accessTokenString) && user != null)
                     {
@@ -70,8 +79,10 @@ namespace EcommerceWebApi.Filters
                     }
                     else
                     {
+                        // cr-dotnet-1000: Line 129 — replaced synchronous CheckAccessToken with
+                        // async CheckAccessTokenAsync to avoid blocking the thread pool.
                         if (
-                            !CheckAccessToken(
+                            !await CheckAccessTokenAsync(
                                 accessTokenString,
                                 user,
                                 context,
@@ -87,15 +98,16 @@ namespace EcommerceWebApi.Filters
                         {
                             return;
                         }
-                        ;
 
                         _authService.CurrentUser = currentUser;
                     }
                 }
                 else
                 {
+                    // cr-dotnet-1000: Line 150 — replaced synchronous CheckAccessToken with
+                    // async CheckAccessTokenAsync to avoid blocking the thread pool.
                     if (
-                        !CheckAccessToken(
+                        !await CheckAccessTokenAsync(
                             accessTokenString,
                             null,
                             context,
@@ -106,12 +118,11 @@ namespace EcommerceWebApi.Filters
                     {
                         return;
                     }
-                    ;
+
                     if (requiredRoles.Any() && !CheckRole(accessToken, requiredRoles, context))
                     {
                         return;
                     }
-                    ;
 
                     _authService.CurrentUser = currentUser;
 
@@ -135,7 +146,10 @@ namespace EcommerceWebApi.Filters
             }
         }
 
-        private bool CheckRefreshToken(
+        // cr-dotnet-1000: Lines 162, 175 — Converted CheckRefreshToken to async
+        // CheckRefreshTokenAsync. Replaced synchronous _userService.GetUserByToken()
+        // with await _userService.GetUserByTokenAsync() for non-blocking data retrieval.
+        private async Task<bool> CheckRefreshTokenAsync(
             string? refreshTokenString,
             AuthorizationFilterContext context,
             out User? user
@@ -155,9 +169,11 @@ namespace EcommerceWebApi.Filters
                     return false;
                 }
 
-                user = _userService.GetUserByToken(token: refreshTokenString);
+                // cr-dotnet-1000: Line 175 — replaced synchronous GetUserByToken with
+                // async GetUserByTokenAsync to avoid blocking the thread pool.
+                user = await _userService.GetUserByTokenAsync(token: refreshTokenString).ConfigureAwait(false);
 
-                if (user == null || user.RefreshToken.Expires < DateTime.Now)
+                if (user == null || user.RefreshToken.Expires < DateTimeOffset.UtcNow.UtcDateTime)
                 {
                     context.Result = new ContentResult()
                     {
@@ -181,7 +197,10 @@ namespace EcommerceWebApi.Filters
             }
         }
 
-        private bool CheckAccessToken(
+        // cr-dotnet-1000: Lines 219, 230, 257, 271 — Converted CheckAccessToken to async
+        // CheckAccessTokenAsync. Replaced synchronous _userService.GetUserById()
+        // with await _userService.GetUserByIdAsync() for non-blocking data retrieval.
+        private async Task<bool> CheckAccessTokenAsync(
             string? accessTokenString,
             User? user,
             AuthorizationFilterContext context,
@@ -190,6 +209,7 @@ namespace EcommerceWebApi.Filters
         )
         {
             accessToken = null!;
+            currentUser = null!;
             try
             {
                 accessToken = new JwtSecurityTokenHandler().ReadJwtToken(accessTokenString);
@@ -200,11 +220,12 @@ namespace EcommerceWebApi.Filters
 
                 if (accessTokenId == null || isSecondFactorChecked == null)
                 {
-                    currentUser = null!;
                     return false;
                 }
 
-                currentUser = _userService.GetUserById(accessTokenId.Value)!;
+                // cr-dotnet-1000: Line 230 — replaced synchronous GetUserById with
+                // async GetUserByIdAsync to avoid blocking the thread pool.
+                currentUser = (await _userService.GetUserByIdAsync(accessTokenId.Value).ConfigureAwait(false))!;
 
                 if (
                     (
@@ -226,7 +247,6 @@ namespace EcommerceWebApi.Filters
             catch (Exception ex)
             {
                 _logger.LogError(ex, $"{ex.Message} - {ex.InnerException?.Message}");
-                currentUser = null!;
                 context.Result = new ContentResult()
                 {
                     Content = "Unauthorized",

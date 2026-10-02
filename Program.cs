@@ -1,10 +1,13 @@
+using Amazon.S3;
 using EcommerceWebApi;
 using EcommerceWebApi.Authentication;
 using EcommerceWebApi.Filters;
 using EcommerceWebApi.Notification;
 using EcommerceWebApi.Services;
+using Microsoft.AspNetCore.ResponseCompression;
 using Serilog;
 using Serilog.Events;
+using System.IO.Compression;
 using System.Text.Json.Serialization;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -22,6 +25,32 @@ var logger = new LoggerConfiguration().MinimumLevel
     )
     .CreateLogger();
 builder.Logging.AddSerilog(logger);
+
+// cr-dotnet-1016: Enable ResponseCompression middleware with Gzip and Brotli providers
+// to reduce egress bandwidth costs on AWS-hosted ASP.NET applications.
+builder.Services.AddResponseCompression(options =>
+{
+    options.EnableForHttps = true;
+    options.Providers.Add<BrotliCompressionProvider>();
+    options.Providers.Add<GzipCompressionProvider>();
+    options.MimeTypes = ResponseCompressionDefaults.MimeTypes.Concat(new[]
+    {
+        "text/html",
+        "text/plain",
+        "text/css",
+        "application/javascript",
+        "application/json",
+        "text/json"
+    });
+});
+builder.Services.Configure<BrotliCompressionProviderOptions>(options =>
+{
+    options.Level = CompressionLevel.Fastest;
+});
+builder.Services.Configure<GzipCompressionProviderOptions>(options =>
+{
+    options.Level = CompressionLevel.SmallestSize;
+});
 
 builder.Services.AddControllers();
 builder.Services
@@ -45,6 +74,14 @@ builder.Services.AddCors(options =>
     });
 });
 
+// cr-dotnet-0048: Register AWS S3 client and the cloud-native update service
+// that replaces ClickOnce deployment. Application packages are hosted on S3
+// and distributed via CloudFront CDN. Version checking and automated updates
+// are handled through IAwsUpdateService / AwsUpdateService.
+builder.Services.AddDefaultAWSOptions(builder.Configuration.GetAWSOptions());
+builder.Services.AddAWSService<IAmazonS3>();
+builder.Services.AddScoped<IAwsUpdateService, AwsUpdateService>();
+
 builder.Services.AddScoped<UnitOfWork>();
 
 builder.Services.AddScoped<UserService>();
@@ -66,6 +103,10 @@ if (app.Environment.IsDevelopment())
     app.UseSwagger();
     app.UseSwaggerUI();
 }
+
+// cr-dotnet-1016: UseResponseCompression must be placed early in the pipeline,
+// before UseCors and MapControllers, so all responses are compressed.
+app.UseResponseCompression();
 
 app.UseCors();
 app.MapControllers();
