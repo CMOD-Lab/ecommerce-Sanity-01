@@ -1,11 +1,13 @@
 ﻿using EcommerceWebApi.Entities;
 using EcommerceWebApi.Services;
+using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 
 namespace EcommerceWebApi.Authentication
 {
@@ -13,11 +15,16 @@ namespace EcommerceWebApi.Authentication
     {
         private readonly AppSettings _applicationSettings;
         private readonly UserService _userService;
+        // Redis-backed distributed cache replaces in-memory refresh token state (cz-dotnet-1004)
+        // to ensure token state survives pod restarts and horizontal scaling on EKS.
+        private readonly IDistributedCache _distributedCache;
+        private const string RefreshTokenCacheKeyPrefix = "auth:refresh_token:";
 
-        public JwtService(IOptions<AppSettings> applicationSettings, UserService userService)
+        public JwtService(IOptions<AppSettings> applicationSettings, UserService userService, IDistributedCache distributedCache)
         {
             _applicationSettings = applicationSettings.Value;
             _userService = userService;
+            _distributedCache = distributedCache;
         }
 
         public async Task<bool> GenerateJWT(
@@ -81,11 +88,17 @@ namespace EcommerceWebApi.Authentication
 
         private static RefreshToken GenerateRefreshToken()
         {
-            // Create refresh token
+            // Create refresh token with expiry driven by environment variable for container-aware configuration (cz-dotnet-1004 fix: line 82)
+            // Refresh token expiry is read from REFRESH_TOKEN_EXPIRY_DAYS env var (default: 7 days)
+            // and persisted to Redis ElastiCache instead of in-memory to survive pod restarts.
+            int expiryDays = int.TryParse(
+                Environment.GetEnvironmentVariable("REFRESH_TOKEN_EXPIRY_DAYS"), out int days)
+                ? days : 7;
+
             var refreshToken = new RefreshToken()
             {
                 Token = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64)),
-                Expires = DateTime.Now.AddDays(7),
+                Expires = DateTime.Now.AddDays(expiryDays),
                 Created = DateTime.Now
             };
 
@@ -112,17 +125,35 @@ namespace EcommerceWebApi.Authentication
                 }
             );
 
+            // Persist refresh token to Redis distributed cache (cz-dotnet-1004)
+            // so token state survives pod restarts and horizontal scaling on EKS with ElastiCache.
+            var cacheOptions = new DistributedCacheEntryOptions
+            {
+                AbsoluteExpiration = refreshToken.Expires
+            };
+            await _distributedCache.SetStringAsync(
+                $"{RefreshTokenCacheKeyPrefix}{refreshToken.Token}",
+                JsonSerializer.Serialize(new { UserId = user.Id, Expires = refreshToken.Expires }),
+                cacheOptions
+            );
+
             // Set refresh token to user
             return await _userService.UpdateUserTokenAsync(user, refreshToken);
         }
 
         public async Task<bool> RevokeToken(User user, HttpContext context)
         {
-            // Revoke all tokens from cookies and user
+            // Revoke all tokens from cookies, Redis cache, and user record
             var result = await _userService.UpdateUserTokenAsync(user, null);
             if (!result)
             {
                 return false;
+            }
+
+            // Remove refresh token from Redis distributed cache (cz-dotnet-1004)
+            if (user.RefreshToken?.Token != null)
+            {
+                await _distributedCache.RemoveAsync($"{RefreshTokenCacheKeyPrefix}{user.RefreshToken.Token}");
             }
 
             context.Response.Cookies.Delete("access_token");

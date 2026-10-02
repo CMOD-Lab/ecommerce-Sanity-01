@@ -1,4 +1,5 @@
-﻿using OtpNet;
+﻿using Microsoft.Extensions.Caching.Distributed;
+using OtpNet;
 using System.Globalization;
 using System.Web;
 
@@ -6,9 +7,18 @@ namespace EcommerceWebApi.Authentication
 {
     public class TotpService : ITotpService
     {
-        private static long timeWindowUsedCurrent = new();
+        // Redis-backed distributed cache replaces static in-memory timeWindowUsedCurrent (cz-dotnet-1004 fix: line 9)
+        // to ensure TOTP replay protection state survives pod restarts and works correctly
+        // across all replicas during horizontal scaling on EKS with ElastiCache.
+        private readonly IDistributedCache _distributedCache;
+        private const string TotpWindowCacheKeyPrefix = "auth:totp_window:";
 
         private const string issuer = "EcommerceWebApi";
+
+        public TotpService(IDistributedCache distributedCache)
+        {
+            _distributedCache = distributedCache;
+        }
 
         public string GenerateBase32Secret()
         {
@@ -89,12 +99,23 @@ namespace EcommerceWebApi.Authentication
                     VerificationWindow.RfcSpecifiedNetworkDelay
                 );
 
-                // Check if TOTP has been used
-                if (timeWindowUsedCurrent == timeWindowUsed)
+                // Check if TOTP has been used via Redis distributed cache (cz-dotnet-1004 fix: line 52)
+                // Replaces static in-memory timeWindowUsedCurrent to ensure replay protection works
+                // across all pod replicas and survives pod restarts on EKS with ElastiCache.
+                var cacheKey = $"{TotpWindowCacheKeyPrefix}{base32Secret}";
+                var cachedWindowStr = _distributedCache.GetString(cacheKey);
+                if (cachedWindowStr != null && long.TryParse(cachedWindowStr, out long cachedWindow)
+                    && cachedWindow == timeWindowUsed)
                 {
                     return false;
                 }
-                timeWindowUsedCurrent = timeWindowUsed;
+
+                // Store the used time window in Redis with a short TTL (2 TOTP periods = 60s)
+                var cacheOptions = new DistributedCacheEntryOptions
+                {
+                    AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(60)
+                };
+                _distributedCache.SetString(cacheKey, timeWindowUsed.ToString(), cacheOptions);
 
                 return verify;
             }
@@ -106,11 +127,12 @@ namespace EcommerceWebApi.Authentication
 
         public static DateTime GetNistTime()
         {
-            // Get UTC time from the response header of request to "http://www.google.com"
+            // Get UTC time from the response header of request to the configured time server URL
+            var timeServerUrl = Environment.GetEnvironmentVariable("TIME_SERVER_URL") ?? "http://www.google.com";
             using var httpClient = new HttpClient();
             try
             {
-                using var response = httpClient.GetAsync("http://www.google.com").Result;
+                using var response = httpClient.GetAsync(timeServerUrl).Result;
                 if (response.IsSuccessStatusCode && response.Headers.Date != null)
                 {
                     return DateTime.ParseExact(

@@ -10,6 +10,17 @@ using System.Text.Json.Serialization;
 var builder = WebApplication.CreateBuilder(args);
 ConfigurationManager configuration = builder.Configuration;
 
+// cz-dotnet-1005: Configure Kestrel port via environment variable for container/Kubernetes deployments.
+// KESTREL_PORT env var (injected via Kubernetes ConfigMap) drives dynamic port assignment,
+// preventing hardcoded port conflicts in container orchestration platforms.
+builder.WebHost.ConfigureKestrel(serverOptions =>
+{
+    var kestrelPort = int.TryParse(
+        Environment.GetEnvironmentVariable("KESTREL_PORT"),
+        out var parsedPort) ? parsedPort : 8080;
+    serverOptions.ListenAnyIP(kestrelPort);
+});
+
 var logger = new LoggerConfiguration().MinimumLevel
     .Debug()
     .MinimumLevel.Override("Microsoft", LogEventLevel.Information)
@@ -31,14 +42,37 @@ builder.Services
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
+builder.Services.AddHealthChecks();
+
+// Configure Redis-backed distributed cache for Blazor Server circuit state persistence (cz-dotnet-1004)
+// Uses Amazon ElastiCache for Redis on EKS to ensure circuit/session state survives pod restarts
+// and horizontal scaling. REDIS_CONNECTION_STRING env var must be set to the ElastiCache endpoint.
+var redisConnectionString = Environment.GetEnvironmentVariable("REDIS_CONNECTION_STRING")
+    ?? builder.Configuration.GetConnectionString("Redis")
+    ?? "localhost:6379";
+
+builder.Services.AddStackExchangeRedisCache(options =>
+{
+    options.Configuration = redisConnectionString;
+    options.InstanceName = Environment.GetEnvironmentVariable("REDIS_INSTANCE_NAME") ?? "EcommerceWebApi:";
+});
+
 builder.Services.Configure<AppSettings>(builder.Configuration.GetSection("ApplicationSettings"));
+
+// cz-dotnet-1005: Replace hardcoded SignalR CORS origin with environment-variable-driven configuration.
+// SIGNALR_CORS_ORIGINS env var (injected via Kubernetes ConfigMap) allows dynamic origin configuration
+// across environments without rebuilding the container image.
+var signalrCorsOrigins = (Environment.GetEnvironmentVariable("SIGNALR_CORS_ORIGINS")
+    ?? builder.Configuration["SignalR:CorsOrigins"]
+    ?? "http://localhost:3001")
+    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
 builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
     {
         policy
-            .WithOrigins("http://localhost:3001")
+            .WithOrigins(signalrCorsOrigins)
             .AllowAnyHeader()
             .AllowAnyMethod()
             .AllowCredentials();
@@ -70,5 +104,6 @@ if (app.Environment.IsDevelopment())
 app.UseCors();
 app.MapControllers();
 app.MapHub<NotificationHub>("/notificationHub");
+app.MapHealthChecks("/health");
 
 app.Run();

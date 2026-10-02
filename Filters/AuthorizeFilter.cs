@@ -89,7 +89,9 @@ namespace EcommerceWebApi.Filters
                         }
                         ;
 
-                        _authService.CurrentUser = currentUser;
+                        // Use Redis-backed SetCurrentUser instead of direct in-memory assignment (cz-dotnet-1004)
+                        var sessionId = context.HttpContext.Connection.Id;
+                        _authService.SetCurrentUser(currentUser, sessionId);
                     }
                 }
                 else
@@ -113,7 +115,9 @@ namespace EcommerceWebApi.Filters
                     }
                     ;
 
-                    _authService.CurrentUser = currentUser;
+                    // Use Redis-backed SetCurrentUser instead of direct in-memory assignment (cz-dotnet-1004)
+                    var sessionId = context.HttpContext.Connection.Id;
+                    _authService.SetCurrentUser(currentUser, sessionId);
 
                     context.Result = new ContentResult()
                     {

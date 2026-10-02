@@ -1,6 +1,8 @@
 ﻿using EcommerceWebApi.Entities;
 using EcommerceWebApi.Services;
+using Microsoft.Extensions.Caching.Distributed;
 using System.Security.Cryptography;
+using System.Text.Json;
 
 namespace EcommerceWebApi.Authentication
 {
@@ -9,13 +11,17 @@ namespace EcommerceWebApi.Authentication
         private readonly IUserService _userService;
         private readonly ITotpService _totpService;
         private readonly IJwtService _jwtService;
-        public User CurrentUser { get; internal set; } = null!;
+        // Redis-backed distributed cache replaces in-memory CurrentUser state (cz-dotnet-1004)
+        // to ensure circuit/session state survives pod restarts and horizontal scaling on EKS.
+        private readonly IDistributedCache _distributedCache;
+        private const string CurrentUserCacheKeyPrefix = "auth:current_user:";
 
-        public AuthService(UserService userService, TotpService totpService, JwtService jwtService)
+        public AuthService(UserService userService, TotpService totpService, JwtService jwtService, IDistributedCache distributedCache)
         {
             _userService = userService;
             _totpService = totpService;
             _jwtService = jwtService;
+            _distributedCache = distributedCache;
         }
 
         public enum AuthResult
@@ -26,6 +32,35 @@ namespace EcommerceWebApi.Authentication
             NeedSecondFactorAuth,
             Success,
             Fail
+        }
+
+        // CurrentUser is now backed by Redis distributed cache instead of in-memory field (cz-dotnet-1004 fix: line 31)
+        public User CurrentUser
+        {
+            get
+            {
+                var sessionId = _currentSessionId;
+                if (string.IsNullOrEmpty(sessionId)) return null!;
+                var cached = _distributedCache.GetString($"{CurrentUserCacheKeyPrefix}{sessionId}");
+                if (string.IsNullOrEmpty(cached)) return null!;
+                return JsonSerializer.Deserialize<User>(cached)!;
+            }
+        }
+
+        private string? _currentSessionId;
+
+        internal void SetCurrentUser(User user, string sessionId)
+        {
+            _currentSessionId = sessionId;
+            var options = new DistributedCacheEntryOptions
+            {
+                AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(30)
+            };
+            _distributedCache.SetString(
+                $"{CurrentUserCacheKeyPrefix}{sessionId}",
+                JsonSerializer.Serialize(user),
+                options
+            );
         }
 
         private static bool CheckPassword(User user, string password)
