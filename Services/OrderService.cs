@@ -40,12 +40,13 @@ namespace EcommerceWebApi.Services
                 products.Add(pair.Key, product);
             }
 
+            // .NET 8: Use DateTime.UtcNow for consistent timezone handling
             Order order =
                 new()
                 {
                     UserId = userId,
                     ProductList = productList,
-                    Created = DateTime.Now,
+                    Created = DateTime.UtcNow,
                     Status = OrderStatus.Pending
                 };
 
@@ -200,7 +201,8 @@ namespace EcommerceWebApi.Services
                     throw new InvalidOperationException($"Current status already is {status}");
                 }
                 order.Status = status;
-                order.Updated = DateTime.Now;
+                // .NET 8: Use DateTime.UtcNow for consistent timezone handling
+                order.Updated = DateTime.UtcNow;
                 if (status == OrderStatus.Canceled)
                 {
                     var fillResult = await RefillProductAsync(order);
