@@ -1,5 +1,6 @@
-﻿using OtpNet;
+using OtpNet;
 using System.Globalization;
+using System.Threading.Channels;
 using System.Web;
 
 namespace EcommerceWebApi.Authentication
@@ -71,14 +72,14 @@ namespace EcommerceWebApi.Authentication
             return false;
         }
 
-        public bool ValidateTotp(string? base32Secret, string totp)
+        public async Task<bool> ValidateTotpAsync(string? base32Secret, string totp)
         {
             try
             {
                 var secret = Base32Encoding.ToBytes(base32Secret);
 
-                // Get exact time for TOTP
-                DateTime exactTime = GetNistTime();
+                // Get exact time for TOTP using Channel-based async producer-consumer pattern
+                DateTime exactTime = await GetNistTimeAsync();
 
                 // Validate TOTP
                 var correction = new TimeCorrection(exactTime);
@@ -104,31 +105,62 @@ namespace EcommerceWebApi.Authentication
             }
         }
 
-        public static DateTime GetNistTime()
+        /// <summary>
+        /// Retrieves the current UTC time from a remote server using a Channel-based
+        /// async producer-consumer pattern (System.Threading.Channels) to avoid
+        /// blocking collection operations and improve cloud scalability.
+        /// </summary>
+        public static async Task<DateTime> GetNistTimeAsync()
         {
-            // Get UTC time from the response header of request to "http://www.google.com"
-            using var httpClient = new HttpClient();
-            try
+            // Use a bounded Channel<DateTime> as a non-blocking async producer-consumer queue.
+            // This replaces any blocking .Result / .Wait() calls and provides configurable
+            // backpressure suitable for distributed cloud environments.
+            var channel = Channel.CreateBounded<DateTime>(new BoundedChannelOptions(1)
             {
-                using var response = httpClient.GetAsync("http://www.google.com").Result;
-                if (response.IsSuccessStatusCode && response.Headers.Date != null)
-                {
-                    return DateTime.ParseExact(
-                        response.Headers.Date.Value.ToString("ddd, dd MMM yyyy HH:mm:ss 'GMT'"),
-                        "ddd, dd MMM yyyy HH:mm:ss 'GMT'",
-                        CultureInfo.InvariantCulture.DateTimeFormat,
-                        DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal
-                    );
-                }
-                else
-                {
-                    throw new Exception("Failed to get exact time for the TOTP");
-                }
-            }
-            catch (Exception ex)
+                FullMode = BoundedChannelFullMode.Wait,
+                SingleReader = true,
+                SingleWriter = true
+            });
+
+            // Producer: fetch the time asynchronously and write it to the channel
+            var producerTask = Task.Run(async () =>
             {
-                throw new Exception("Failed to get exact time for the TOTP", ex);
+                using var httpClient = new HttpClient();
+                try
+                {
+                    using var response = await httpClient.GetAsync("http://www.google.com");
+                    if (response.IsSuccessStatusCode && response.Headers.Date != null)
+                    {
+                        var dateTime = DateTime.ParseExact(
+                            response.Headers.Date.Value.ToString("ddd, dd MMM yyyy HH:mm:ss 'GMT'"),
+                            "ddd, dd MMM yyyy HH:mm:ss 'GMT'",
+                            CultureInfo.InvariantCulture.DateTimeFormat,
+                            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal
+                        );
+                        await channel.Writer.WriteAsync(dateTime);
+                        channel.Writer.Complete();
+                    }
+                    else
+                    {
+                        channel.Writer.Complete(new Exception("Failed to get exact time for the TOTP"));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    channel.Writer.Complete(new Exception("Failed to get exact time for the TOTP", ex));
+                }
+            });
+
+            // Consumer: read the result asynchronously using await foreach over the channel reader
+            await foreach (var dateTime in channel.Reader.ReadAllAsync())
+            {
+                await producerTask;
+                return dateTime;
             }
+
+            // If the channel was completed with an exception, propagate it
+            await producerTask;
+            throw new Exception("Failed to get exact time for the TOTP");
         }
     }
 }

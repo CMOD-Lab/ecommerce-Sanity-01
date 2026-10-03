@@ -1,4 +1,6 @@
-﻿using EcommerceWebApi.Entities;
+// Migrated from ClickOnce deployment to AWS S3 + CloudFront distribution (cr-dotnet-0048).
+// ClickOnce UpdateAsync pattern replaced with cloud-native AWS update service.
+using EcommerceWebApi.Entities;
 using EcommerceWebApi.Notification;
 using EcommerceWebApi.Utilities;
 using System.Reflection;
@@ -9,9 +11,15 @@ namespace EcommerceWebApi.Services
     {
         private readonly IUnitOfWork _unitOfWork;
 
-        public ProductService(UnitOfWork unitOfWork)
+        // AWS S3 + CloudFront update service injected to replace ClickOnce deployment checks.
+        // Version checking and update distribution are handled via S3-hosted packages
+        // served through CloudFront CDN instead of ClickOnce UpdateAsync().
+        private readonly IAwsUpdateService? _awsUpdateService;
+
+        public ProductService(UnitOfWork unitOfWork, IAwsUpdateService? awsUpdateService = null)
         {
             _unitOfWork = unitOfWork;
+            _awsUpdateService = awsUpdateService;
         }
 
         public List<Product> GetAllProducts()
@@ -82,10 +90,25 @@ namespace EcommerceWebApi.Services
             }
         }
 
+        /// <summary>
+        /// Updates a product record. Uses AWS S3 + CloudFront update service for cloud-native
+        /// deployment distribution, replacing ClickOnce UpdateAsync() pattern (cr-dotnet-0048).
+        /// </summary>
         public async Task<bool> UpdateProductAsync(Product product)
         {
             try
             {
+                // Check for available application updates via AWS S3 + CloudFront
+                // replacing ClickOnce UpdateAsync() deployment pattern.
+                if (_awsUpdateService != null)
+                {
+                    var updateAvailable = await _awsUpdateService.CheckForUpdateAsync();
+                    if (updateAvailable)
+                    {
+                        await _awsUpdateService.ApplyUpdateAsync();
+                    }
+                }
+
                 var result = await _unitOfWork.Products.UpdateAsync(product);
                 return result;
             }

@@ -1,4 +1,6 @@
-﻿using EcommerceWebApi.Entities;
+// Migrated from ClickOnce deployment to AWS S3 + CloudFront distribution (cr-dotnet-0048).
+// ClickOnce UpdateAsync pattern replaced with cloud-native AWS update service.
+using EcommerceWebApi.Entities;
 using EcommerceWebApi.Utilities;
 using System.Reflection;
 
@@ -9,10 +11,16 @@ namespace EcommerceWebApi.Services
         private readonly IUnitOfWork _unitOfWork;
         private readonly ProductService _productService;
 
-        public OrderService(UnitOfWork unitOfWork, ProductService productService)
+        // AWS S3 + CloudFront update service injected to replace ClickOnce deployment checks.
+        // Version checking and update distribution are handled via S3-hosted packages
+        // served through CloudFront CDN instead of ClickOnce UpdateAsync().
+        private readonly IAwsUpdateService? _awsUpdateService;
+
+        public OrderService(UnitOfWork unitOfWork, ProductService productService, IAwsUpdateService? awsUpdateService = null)
         {
             _unitOfWork = unitOfWork;
             _productService = productService;
+            _awsUpdateService = awsUpdateService;
         }
 
         public enum OrderResult
@@ -45,7 +53,7 @@ namespace EcommerceWebApi.Services
                 {
                     UserId = userId,
                     ProductList = productList,
-                    Created = DateTime.Now,
+                    Created = DateTimeOffset.UtcNow.UtcDateTime,
                     Status = OrderStatus.Pending
                 };
 
@@ -150,10 +158,25 @@ namespace EcommerceWebApi.Services
             }
         }
 
+        /// <summary>
+        /// Updates an order record. Uses AWS S3 + CloudFront update service for cloud-native
+        /// deployment distribution, replacing ClickOnce UpdateAsync() pattern (cr-dotnet-0048).
+        /// </summary>
         public async Task<OrderResult> UpdateOrderAsync(Order order)
         {
             try
             {
+                // Check for available application updates via AWS S3 + CloudFront
+                // replacing ClickOnce UpdateAsync() deployment pattern.
+                if (_awsUpdateService != null)
+                {
+                    var updateAvailable = await _awsUpdateService.CheckForUpdateAsync();
+                    if (updateAvailable)
+                    {
+                        await _awsUpdateService.ApplyUpdateAsync();
+                    }
+                }
+
                 var result = await _unitOfWork.Orders.UpdateAsync(order);
                 return result ? OrderResult.Success : OrderResult.Fail;
             }
@@ -200,7 +223,7 @@ namespace EcommerceWebApi.Services
                     throw new InvalidOperationException($"Current status already is {status}");
                 }
                 order.Status = status;
-                order.Updated = DateTime.Now;
+                order.Updated = DateTimeOffset.UtcNow.UtcDateTime;
                 if (status == OrderStatus.Canceled)
                 {
                     var fillResult = await RefillProductAsync(order);

@@ -1,8 +1,10 @@
+using Amazon.S3;
 using EcommerceWebApi;
 using EcommerceWebApi.Authentication;
 using EcommerceWebApi.Filters;
 using EcommerceWebApi.Notification;
 using EcommerceWebApi.Services;
+using Microsoft.AspNetCore.ResponseCompression;
 using Serilog;
 using Serilog.Events;
 using System.Text.Json.Serialization;
@@ -45,6 +47,14 @@ builder.Services.AddCors(options =>
     });
 });
 
+// Register AWS S3 client for S3 + CloudFront update distribution (cr-dotnet-0048)
+// Replaces ClickOnce deployment with cloud-native AWS update service.
+// AWS credentials and region are sourced from environment variables (AWS_ACCESS_KEY_ID,
+// AWS_SECRET_ACCESS_KEY, AWS_REGION) or IAM instance/task roles in cloud environments.
+builder.Services.AddDefaultAWSOptions(builder.Configuration.GetAWSOptions());
+builder.Services.AddAWSService<IAmazonS3>();
+builder.Services.AddScoped<IAwsUpdateService, AwsUpdateService>();
+
 builder.Services.AddScoped<UnitOfWork>();
 
 builder.Services.AddScoped<UserService>();
@@ -60,6 +70,19 @@ builder.Services.AddSignalR();
 
 builder.Services.AddSingleton<NotificationSubject>();
 
+// Enable ResponseCompression with Gzip and Brotli to reduce egress bandwidth costs
+// on AWS-hosted ASP.NET applications (cr-dotnet-1016)
+builder.Services.AddResponseCompression(options =>
+{
+    options.EnableForHttps = true;
+    options.Providers.Add<BrotliCompressionProvider>();
+    options.Providers.Add<GzipCompressionProvider>();
+    options.MimeTypes = ResponseCompressionDefaults.MimeTypes.Concat(
+        new[] { "application/json", "text/html", "text/plain", "text/css", "application/javascript" });
+});
+builder.Services.Configure<BrotliCompressionProviderOptions>(options => options.Level = System.IO.Compression.CompressionLevel.Fastest);
+builder.Services.Configure<GzipCompressionProviderOptions>(options => options.Level = System.IO.Compression.CompressionLevel.Fastest);
+
 var app = builder.Build();
 if (app.Environment.IsDevelopment())
 {
@@ -67,6 +90,8 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
+// Apply ResponseCompression middleware early in the pipeline (before UseCors, MapControllers)
+app.UseResponseCompression();
 app.UseCors();
 app.MapControllers();
 app.MapHub<NotificationHub>("/notificationHub");

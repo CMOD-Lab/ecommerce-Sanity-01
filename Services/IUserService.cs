@@ -1,4 +1,4 @@
-﻿using EcommerceWebApi.Entities;
+using EcommerceWebApi.Entities;
 using EcommerceWebApi.Utilities;
 
 namespace EcommerceWebApi.Services
@@ -10,8 +10,10 @@ namespace EcommerceWebApi.Services
         List<User> GetAllUsers();
         List<User> GetPaginationUsers(PaginationFilter paginationFilter);
         User? GetUserById(string id);
+        Task<User?> GetUserByIdAsync(string id);
         User? GetUserByName(string name);
         User? GetUserByToken(string token);
+        Task<User?> GetUserByTokenAsync(string token);
         Task<bool> InsertUserAsync(User user);
         Task<bool> UpdateUserAsync(User user);
         Task<bool> UpdateUserPropertyAsync<T>(User user, string property, T value);
