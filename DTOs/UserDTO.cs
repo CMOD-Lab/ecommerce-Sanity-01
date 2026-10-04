@@ -6,7 +6,7 @@
 
         public string Username { get; set; } = null!;
 
-        public string Role = null!;
+        public string Role { get; set; } = null!;
 
         public bool IsTwoFactorAuthActivated { get; set; }
     }

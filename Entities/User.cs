@@ -11,7 +11,7 @@ namespace EcommerceWebApi.Entities
         public string Username { get; set; } = null!;
 
         [Required(ErrorMessage = "{0} is required")]
-        public string Role = null!;
+        public string Role { get; set; } = null!;
 
         public bool IsTwoFactorAuthActivated { get; set; }
 
