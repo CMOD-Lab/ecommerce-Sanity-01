@@ -1,0 +1,37 @@
+version: "3.9"
+
+services:
+  ecommercewebapi:
+    image: ecommercewebapi:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ecommercewebapi
+    ports:
+      - "80:80"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:80
+      - DOTNET_RUNNING_IN_CONTAINER=true
+      # Redis connection – supply via .env or override at runtime
+      - REDIS_CONNECTION_STRING=${REDIS_CONNECTION_STRING:-localhost:6379}
+      - REDIS_INSTANCE_NAME=${REDIS_INSTANCE_NAME:-EcommerceWebApi:}
+      # SignalR CORS origin – supply via .env or override at runtime
+      - SIGNALR_CORS_ORIGIN=${SIGNALR_CORS_ORIGIN:-http://localhost:3001}
+      # JWT secret – supply via .env or override at runtime
+      - ApplicationSettings__Secret=${APP_SECRET:-change-me-in-production}
+    volumes:
+      - ./Logs:/app/Logs
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:80/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge

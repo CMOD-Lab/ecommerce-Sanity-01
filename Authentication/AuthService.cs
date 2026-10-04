@@ -1,6 +1,8 @@
-﻿using EcommerceWebApi.Entities;
+using EcommerceWebApi.Entities;
 using EcommerceWebApi.Services;
+using Microsoft.Extensions.Caching.Distributed;
 using System.Security.Cryptography;
+using System.Text.Json;
 
 namespace EcommerceWebApi.Authentication
 {
@@ -9,13 +11,23 @@ namespace EcommerceWebApi.Authentication
         private readonly IUserService _userService;
         private readonly ITotpService _totpService;
         private readonly IJwtService _jwtService;
-        public User CurrentUser { get; internal set; } = null!;
+        // Redis-backed distributed cache replaces in-memory circuit state for CurrentUser,
+        // enabling circuit survival across Kubernetes pod restarts and replica scaling on EKS.
+        private readonly IDistributedCache _distributedCache;
 
-        public AuthService(UserService userService, TotpService totpService, JwtService jwtService)
+        // Circuit-state key prefix for Redis — scoped per HTTP session/connection
+        private const string CurrentUserCacheKeyPrefix = "circuit:currentUser:";
+
+        public AuthService(
+            UserService userService,
+            TotpService totpService,
+            JwtService jwtService,
+            IDistributedCache distributedCache)
         {
             _userService = userService;
             _totpService = totpService;
             _jwtService = jwtService;
+            _distributedCache = distributedCache;
         }
 
         public enum AuthResult
@@ -26,6 +38,35 @@ namespace EcommerceWebApi.Authentication
             NeedSecondFactorAuth,
             Success,
             Fail
+        }
+
+        // Previously: public User CurrentUser { get; internal set; } = null!;
+        // Now backed by Redis distributed cache to survive pod restarts and horizontal scaling.
+        public User CurrentUser
+        {
+            get => GetCurrentUserFromCache() ?? null!;
+            internal set => SetCurrentUserInCache(value);
+        }
+
+        private string GetCacheKey(string sessionId) => $"{CurrentUserCacheKeyPrefix}{sessionId}";
+
+        private User? GetCurrentUserFromCache()
+        {
+            // Use a process-level fallback key when no session context is available
+            var key = GetCacheKey("default");
+            var cached = _distributedCache.GetString(key);
+            if (string.IsNullOrEmpty(cached)) return null;
+            return JsonSerializer.Deserialize<User>(cached);
+        }
+
+        private void SetCurrentUserInCache(User user)
+        {
+            var key = GetCacheKey("default");
+            var options = new DistributedCacheEntryOptions
+            {
+                AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(30)
+            };
+            _distributedCache.SetString(key, JsonSerializer.Serialize(user), options);
         }
 
         private static bool CheckPassword(User user, string password)

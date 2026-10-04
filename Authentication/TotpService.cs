@@ -1,4 +1,5 @@
-﻿using OtpNet;
+using OtpNet;
+using StackExchange.Redis;
 using System.Globalization;
 using System.Web;
 
@@ -6,9 +7,18 @@ namespace EcommerceWebApi.Authentication
 {
     public class TotpService : ITotpService
     {
-        private static long timeWindowUsedCurrent = new();
+        // Redis-backed distributed state replaces the in-memory static field to support
+        // horizontal scaling and pod restarts on EKS with Amazon ElastiCache for Redis.
+        // Previously: private static long timeWindowUsedCurrent = new();
+        private readonly IConnectionMultiplexer _redis;
+        private const string TimeWindowKey = "totp:timeWindowUsedCurrent";
 
         private const string issuer = "EcommerceWebApi";
+
+        public TotpService(IConnectionMultiplexer redis)
+        {
+            _redis = redis;
+        }
 
         public string GenerateBase32Secret()
         {
@@ -89,12 +99,19 @@ namespace EcommerceWebApi.Authentication
                     VerificationWindow.RfcSpecifiedNetworkDelay
                 );
 
-                // Check if TOTP has been used
+                // Check if TOTP has been used — read from Redis instead of in-memory static field
+                var db = _redis.GetDatabase();
+                var storedValue = db.StringGet(TimeWindowKey);
+                long timeWindowUsedCurrent = storedValue.HasValue ? (long)storedValue : 0L;
+
                 if (timeWindowUsedCurrent == timeWindowUsed)
                 {
                     return false;
                 }
-                timeWindowUsedCurrent = timeWindowUsed;
+
+                // Persist updated time window to Redis so all pods share the same replay-protection state
+                // Previously: timeWindowUsedCurrent = timeWindowUsed;
+                db.StringSet(TimeWindowKey, timeWindowUsed, TimeSpan.FromMinutes(5));
 
                 return verify;
             }
@@ -106,11 +123,12 @@ namespace EcommerceWebApi.Authentication
 
         public static DateTime GetNistTime()
         {
-            // Get UTC time from the response header of request to "http://www.google.com"
+            // Get UTC time from the response header of request to the configured time sync URL
+            var timeSyncUrl = Environment.GetEnvironmentVariable("TIME_SYNC_URL") ?? "http://www.google.com";
             using var httpClient = new HttpClient();
             try
             {
-                using var response = httpClient.GetAsync("http://www.google.com").Result;
+                using var response = httpClient.GetAsync(timeSyncUrl).Result;
                 if (response.IsSuccessStatusCode && response.Headers.Date != null)
                 {
                     return DateTime.ParseExact(

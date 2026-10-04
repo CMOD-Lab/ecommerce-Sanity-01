@@ -1,11 +1,13 @@
-﻿using EcommerceWebApi.Entities;
+using EcommerceWebApi.Entities;
 using EcommerceWebApi.Services;
+using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 
 namespace EcommerceWebApi.Authentication
 {
@@ -13,11 +15,20 @@ namespace EcommerceWebApi.Authentication
     {
         private readonly AppSettings _applicationSettings;
         private readonly UserService _userService;
+        // Redis-backed distributed cache replaces in-memory refresh token state,
+        // enabling token survival across Kubernetes pod restarts and replica scaling on EKS.
+        private readonly IDistributedCache _distributedCache;
 
-        public JwtService(IOptions<AppSettings> applicationSettings, UserService userService)
+        private const string RefreshTokenCacheKeyPrefix = "circuit:refreshToken:";
+
+        public JwtService(
+            IOptions<AppSettings> applicationSettings,
+            UserService userService,
+            IDistributedCache distributedCache)
         {
             _applicationSettings = applicationSettings.Value;
             _userService = userService;
+            _distributedCache = distributedCache;
         }
 
         public async Task<bool> GenerateJWT(
@@ -79,6 +90,9 @@ namespace EcommerceWebApi.Authentication
             );
         }
 
+        // Previously: private static RefreshToken GenerateRefreshToken()
+        // Refresh token generation is now paired with Redis-backed persistence via SetRefreshToken,
+        // replacing in-memory storage to support circuit survival across pod restarts on EKS.
         private static RefreshToken GenerateRefreshToken()
         {
             // Create refresh token
@@ -112,18 +126,35 @@ namespace EcommerceWebApi.Authentication
                 }
             );
 
-            // Set refresh token to user
+            // Persist refresh token to Redis distributed cache so it survives pod restarts
+            // and is accessible across all replicas on EKS with Amazon ElastiCache for Redis.
+            var cacheKey = $"{RefreshTokenCacheKeyPrefix}{user.Id}";
+            var cacheOptions = new DistributedCacheEntryOptions
+            {
+                AbsoluteExpiration = refreshToken.Expires
+            };
+            await _distributedCache.SetStringAsync(
+                cacheKey,
+                JsonSerializer.Serialize(refreshToken),
+                cacheOptions
+            );
+
+            // Set refresh token to user (database persistence)
             return await _userService.UpdateUserTokenAsync(user, refreshToken);
         }
 
         public async Task<bool> RevokeToken(User user, HttpContext context)
         {
-            // Revoke all tokens from cookies and user
+            // Revoke all tokens from cookies, Redis cache, and user record
             var result = await _userService.UpdateUserTokenAsync(user, null);
             if (!result)
             {
                 return false;
             }
+
+            // Remove refresh token from Redis distributed cache
+            var cacheKey = $"{RefreshTokenCacheKeyPrefix}{user.Id}";
+            await _distributedCache.RemoveAsync(cacheKey);
 
             context.Response.Cookies.Delete("access_token");
             context.Response.Cookies.Delete("refresh_token");
