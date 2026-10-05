@@ -45,7 +45,7 @@ namespace EcommerceWebApi.Services
                 {
                     UserId = userId,
                     ProductList = productList,
-                    Created = DateTime.Now,
+                    Created = DateTime.UtcNow,
                     Status = OrderStatus.Pending
                 };
 
@@ -200,7 +200,7 @@ namespace EcommerceWebApi.Services
                     throw new InvalidOperationException($"Current status already is {status}");
                 }
                 order.Status = status;
-                order.Updated = DateTime.Now;
+                order.Updated = DateTime.UtcNow;
                 if (status == OrderStatus.Canceled)
                 {
                     var fillResult = await RefillProductAsync(order);
