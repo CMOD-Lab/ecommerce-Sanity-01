@@ -7,11 +7,8 @@ using Serilog;
 using Serilog.Events;
 using System.Text.Json.Serialization;
 
-var builder = WebApplication.CreateBuilder(args);
-ConfigurationManager configuration = builder.Configuration;
-
-var logger = new LoggerConfiguration().MinimumLevel
-    .Debug()
+var logger = new LoggerConfiguration()
+    .MinimumLevel.Debug()
     .MinimumLevel.Override("Microsoft", LogEventLevel.Information)
     .Enrich.FromLogContext()
     .WriteTo.File(
@@ -21,7 +18,13 @@ var logger = new LoggerConfiguration().MinimumLevel
         rollingInterval: RollingInterval.Day
     )
     .CreateLogger();
-builder.Logging.AddSerilog(logger);
+
+Log.Logger = logger;
+
+var builder = WebApplication.CreateBuilder(args);
+ConfigurationManager configuration = builder.Configuration;
+
+builder.Host.UseSerilog();
 
 builder.Services.AddControllers();
 builder.Services
@@ -61,11 +64,15 @@ builder.Services.AddSignalR();
 builder.Services.AddSingleton<NotificationSubject>();
 
 var app = builder.Build();
+
+// Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
 }
+
+app.UseHttpsRedirection();
 
 app.UseCors();
 app.MapControllers();
