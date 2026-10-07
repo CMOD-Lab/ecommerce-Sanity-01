@@ -1,4 +1,4 @@
-﻿using EcommerceWebApi.Authentication;
+using EcommerceWebApi.Authentication;
 using EcommerceWebApi.Entities;
 using EcommerceWebApi.Services;
 using Microsoft.AspNetCore.Mvc;
@@ -157,7 +157,7 @@ namespace EcommerceWebApi.Filters
 
                 user = _userService.GetUserByToken(token: refreshTokenString);
 
-                if (user == null || user.RefreshToken.Expires < DateTime.Now)
+                if (user == null || user.RefreshToken.Expires < DateTime.UtcNow)
                 {
                     context.Result = new ContentResult()
                     {

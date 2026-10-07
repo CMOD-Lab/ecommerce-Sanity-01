@@ -7,11 +7,8 @@ using Serilog;
 using Serilog.Events;
 using System.Text.Json.Serialization;
 
-var builder = WebApplication.CreateBuilder(args);
-ConfigurationManager configuration = builder.Configuration;
-
-var logger = new LoggerConfiguration().MinimumLevel
-    .Debug()
+var logger = new LoggerConfiguration()
+    .MinimumLevel.Debug()
     .MinimumLevel.Override("Microsoft", LogEventLevel.Information)
     .Enrich.FromLogContext()
     .WriteTo.File(
@@ -21,11 +18,15 @@ var logger = new LoggerConfiguration().MinimumLevel
         rollingInterval: RollingInterval.Day
     )
     .CreateLogger();
-builder.Logging.AddSerilog(logger);
 
-builder.Services.AddControllers();
-builder.Services
-    .AddControllers()
+Log.Logger = logger;
+
+var builder = WebApplication.CreateBuilder(args);
+ConfigurationManager configuration = builder.Configuration;
+
+builder.Services.AddSerilog(logger);
+
+builder.Services.AddControllers()
     .AddJsonOptions(x => x.JsonSerializerOptions.ReferenceHandler = ReferenceHandler.IgnoreCycles);
 
 builder.Services.AddEndpointsApiExplorer();

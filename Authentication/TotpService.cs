@@ -1,4 +1,4 @@
-﻿using OtpNet;
+using OtpNet;
 using System.Globalization;
 using System.Web;
 
@@ -78,7 +78,7 @@ namespace EcommerceWebApi.Authentication
                 var secret = Base32Encoding.ToBytes(base32Secret);
 
                 // Get exact time for TOTP
-                DateTime exactTime = GetNistTime();
+                DateTime exactTime = GetNistTimeAsync().GetAwaiter().GetResult();
 
                 // Validate TOTP
                 var correction = new TimeCorrection(exactTime);
@@ -104,13 +104,13 @@ namespace EcommerceWebApi.Authentication
             }
         }
 
-        public static DateTime GetNistTime()
+        public static async Task<DateTime> GetNistTimeAsync()
         {
             // Get UTC time from the response header of request to "http://www.google.com"
             using var httpClient = new HttpClient();
             try
             {
-                using var response = httpClient.GetAsync("http://www.google.com").Result;
+                using var response = await httpClient.GetAsync("http://www.google.com");
                 if (response.IsSuccessStatusCode && response.Headers.Date != null)
                 {
                     return DateTime.ParseExact(
