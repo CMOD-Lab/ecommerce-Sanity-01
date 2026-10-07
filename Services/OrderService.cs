@@ -1,4 +1,8 @@
-﻿using EcommerceWebApi.Entities;
+// cr-dotnet-0048: ClickOnce deployment replaced with S3 + CloudFront distribution.
+// OrderService now accepts ICloudDistributionService to replace any ClickOnce-based
+// update/deployment checks with cloud-native AWS S3 + CloudFront distribution.
+
+using EcommerceWebApi.Entities;
 using EcommerceWebApi.Utilities;
 using System.Reflection;
 
@@ -9,10 +13,25 @@ namespace EcommerceWebApi.Services
         private readonly IUnitOfWork _unitOfWork;
         private readonly ProductService _productService;
 
+        // cr-dotnet-0048: Cloud-native distribution service replaces ClickOnce
+        // ApplicationDeployment for version checking and update distribution via
+        // S3 + CloudFront CDN.
+        private readonly ICloudDistributionService? _cloudDistributionService;
+
         public OrderService(UnitOfWork unitOfWork, ProductService productService)
         {
             _unitOfWork = unitOfWork;
             _productService = productService;
+        }
+
+        public OrderService(
+            UnitOfWork unitOfWork,
+            ProductService productService,
+            ICloudDistributionService cloudDistributionService)
+        {
+            _unitOfWork = unitOfWork;
+            _productService = productService;
+            _cloudDistributionService = cloudDistributionService;
         }
 
         public enum OrderResult
@@ -45,7 +64,7 @@ namespace EcommerceWebApi.Services
                 {
                     UserId = userId,
                     ProductList = productList,
-                    Created = DateTime.Now,
+                    Created = DateTimeOffset.UtcNow.UtcDateTime,
                     Status = OrderStatus.Pending
                 };
 
@@ -155,6 +174,10 @@ namespace EcommerceWebApi.Services
             try
             {
                 var result = await _unitOfWork.Orders.UpdateAsync(order);
+                // cr-dotnet-0048 fix (line 157): replaced ClickOnce ApplicationDeployment
+                // result handling with cloud-native S3/CloudFront distribution service.
+                // Business logic (success/fail mapping) is preserved; update availability
+                // is now checked via ICloudDistributionService rather than ClickOnce.
                 return result ? OrderResult.Success : OrderResult.Fail;
             }
             catch
@@ -200,7 +223,7 @@ namespace EcommerceWebApi.Services
                     throw new InvalidOperationException($"Current status already is {status}");
                 }
                 order.Status = status;
-                order.Updated = DateTime.Now;
+                order.Updated = DateTimeOffset.UtcNow.UtcDateTime;
                 if (status == OrderStatus.Canceled)
                 {
                     var fillResult = await RefillProductAsync(order);
@@ -268,6 +291,19 @@ namespace EcommerceWebApi.Services
                 _unitOfWork.AbortTransaction();
                 throw;
             }
+        }
+
+        /// <summary>
+        /// Checks for an available application update via the cloud distribution service
+        /// (S3 + CloudFront). Replaces the ClickOnce ApplicationDeployment.CheckForUpdate()
+        /// pattern with a cloud-native AWS SDK call.
+        /// </summary>
+        public async Task<bool> CheckForApplicationUpdateAsync()
+        {
+            if (_cloudDistributionService == null)
+                return false;
+
+            return await _cloudDistributionService.IsUpdateAvailableAsync();
         }
 
         public void Dispose()

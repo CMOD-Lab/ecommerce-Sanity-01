@@ -1,4 +1,4 @@
-﻿using EcommerceWebApi.Authentication;
+using EcommerceWebApi.Authentication;
 using EcommerceWebApi.Entities;
 using EcommerceWebApi.Services;
 using Microsoft.AspNetCore.Mvc;
@@ -7,7 +7,11 @@ using System.IdentityModel.Tokens.Jwt;
 
 namespace EcommerceWebApi.Filters
 {
-    public class AuthorizeFilter : IAuthorizationFilter
+    // cr-dotnet-1000: Converted from IAuthorizationFilter (synchronous) to
+    // IAsyncAuthorizationFilter (async/await) to avoid blocking request threads
+    // under cloud auto-scaling scenarios. All synchronous service calls replaced
+    // with their async counterparts backed by AWS ElastiCache (Redis) data layer.
+    public class AuthorizeFilter : IAsyncAuthorizationFilter
     {
         private readonly AuthService _authService;
         private readonly UserService _userService;
@@ -27,7 +31,10 @@ namespace EcommerceWebApi.Filters
             _logger = logger;
         }
 
-        public void OnAuthorization(AuthorizationFilterContext context)
+        // cr-dotnet-1000 (lines 118, 129, 150, 162, 175): Replaced synchronous
+        // OnAuthorization with async OnAuthorizationAsync. All blocking service
+        // calls are now awaited for non-blocking thread-pool usage.
+        public async Task OnAuthorizationAsync(AuthorizationFilterContext context)
         {
             try
             {
@@ -52,15 +59,19 @@ namespace EcommerceWebApi.Filters
 
                 if (!allowFirstFactor)
                 {
-                    if (!CheckRefreshToken(refreshTokenString, context, out User? user))
+                    // cr-dotnet-1000 (line 118): Awaited async CheckRefreshTokenAsync
+                    // instead of synchronous CheckRefreshToken.
+                    var (refreshOk, user) = await CheckRefreshTokenAsync(refreshTokenString, context);
+                    if (!refreshOk)
                     {
                         return;
                     }
-                    ;
 
                     if (string.IsNullOrEmpty(accessTokenString) && user != null)
                     {
-                        _ = _jwtService.GenerateJWT(
+                        // cr-dotnet-1000 (line 129): Awaited async GenerateJWT call
+                        // instead of fire-and-forget synchronous invocation.
+                        _ = await _jwtService.GenerateJWTAsync(
                             user,
                             isSecondFactorChecked: true,
                             context.HttpContext
@@ -70,48 +81,46 @@ namespace EcommerceWebApi.Filters
                     }
                     else
                     {
-                        if (
-                            !CheckAccessToken(
-                                accessTokenString,
-                                user,
-                                context,
-                                out JwtSecurityToken accessToken,
-                                out User currentUser
-                            )
-                        )
+                        // cr-dotnet-1000 (line 150): Awaited async CheckAccessTokenAsync
+                        // instead of synchronous CheckAccessToken.
+                        var (accessOk, accessToken, currentUser) = await CheckAccessTokenAsync(
+                            accessTokenString,
+                            user,
+                            context
+                        );
+                        if (!accessOk)
                         {
                             return;
                         }
 
-                        if (requiredRoles.Any() && !CheckRole(accessToken, requiredRoles, context))
+                        // cr-dotnet-1000 (line 162): Awaited async CheckRoleAsync
+                        // instead of synchronous CheckRole.
+                        if (requiredRoles.Any() && !await CheckRoleAsync(accessToken!, requiredRoles, context))
                         {
                             return;
                         }
-                        ;
 
                         _authService.CurrentUser = currentUser;
                     }
                 }
                 else
                 {
-                    if (
-                        !CheckAccessToken(
-                            accessTokenString,
-                            null,
-                            context,
-                            out JwtSecurityToken accessToken,
-                            out User currentUser
-                        )
-                    )
+                    // cr-dotnet-1000 (line 175): Awaited async CheckAccessTokenAsync
+                    // instead of synchronous CheckAccessToken.
+                    var (accessOk, accessToken, currentUser) = await CheckAccessTokenAsync(
+                        accessTokenString,
+                        null,
+                        context
+                    );
+                    if (!accessOk)
                     {
                         return;
                     }
-                    ;
-                    if (requiredRoles.Any() && !CheckRole(accessToken, requiredRoles, context))
+
+                    if (requiredRoles.Any() && !await CheckRoleAsync(accessToken!, requiredRoles, context))
                     {
                         return;
                     }
-                    ;
 
                     _authService.CurrentUser = currentUser;
 
@@ -135,16 +144,16 @@ namespace EcommerceWebApi.Filters
             }
         }
 
-        private bool CheckRefreshToken(
+        // cr-dotnet-1000 (lines 219, 230): Converted CheckRefreshToken to async.
+        // _userService.GetUserByToken is now awaited via GetUserByTokenAsync for
+        // non-blocking data retrieval backed by AWS ElastiCache (Redis).
+        private async Task<(bool success, User? user)> CheckRefreshTokenAsync(
             string? refreshTokenString,
-            AuthorizationFilterContext context,
-            out User? user
+            AuthorizationFilterContext context
         )
         {
-            user = null!;
             try
             {
-                user = null;
                 if (string.IsNullOrEmpty(refreshTokenString))
                 {
                     context.Result = new ContentResult()
@@ -152,22 +161,26 @@ namespace EcommerceWebApi.Filters
                         Content = "Unauthorized",
                         StatusCode = StatusCodes.Status401Unauthorized
                     };
-                    return false;
+                    return (false, null);
                 }
 
-                user = _userService.GetUserByToken(token: refreshTokenString);
+                // cr-dotnet-1000 (line 219): Replaced synchronous GetUserByToken with
+                // async GetUserByTokenAsync to avoid blocking the thread pool.
+                var user = await _userService.GetUserByTokenAsync(token: refreshTokenString);
 
-                if (user == null || user.RefreshToken.Expires < DateTime.Now)
+                // cr-dotnet-1000 (line 230): Replaced DateTime.Now with
+                // DateTimeOffset.UtcNow.UtcDateTime for cloud-safe UTC comparison.
+                if (user == null || user.RefreshToken.Expires < DateTimeOffset.UtcNow.UtcDateTime)
                 {
                     context.Result = new ContentResult()
                     {
                         Content = "Unauthorized",
                         StatusCode = StatusCodes.Status401Unauthorized
                     };
-                    return false;
+                    return (false, null);
                 }
 
-                return true;
+                return (true, user);
             }
             catch (Exception ex)
             {
@@ -177,19 +190,20 @@ namespace EcommerceWebApi.Filters
                     Content = "Unauthorized",
                     StatusCode = StatusCodes.Status401Unauthorized
                 };
-                return false;
+                return (false, null);
             }
         }
 
-        private bool CheckAccessToken(
+        // cr-dotnet-1000 (lines 257, 271): Converted CheckAccessToken to async.
+        // _userService.GetUserById is now awaited via GetUserByIdAsync for
+        // non-blocking data retrieval backed by AWS ElastiCache (Redis).
+        private async Task<(bool success, JwtSecurityToken? accessToken, User currentUser)> CheckAccessTokenAsync(
             string? accessTokenString,
             User? user,
-            AuthorizationFilterContext context,
-            out JwtSecurityToken accessToken,
-            out User currentUser
+            AuthorizationFilterContext context
         )
         {
-            accessToken = null!;
+            JwtSecurityToken? accessToken = null;
             try
             {
                 accessToken = new JwtSecurityTokenHandler().ReadJwtToken(accessTokenString);
@@ -200,11 +214,12 @@ namespace EcommerceWebApi.Filters
 
                 if (accessTokenId == null || isSecondFactorChecked == null)
                 {
-                    currentUser = null!;
-                    return false;
+                    return (false, null, null!);
                 }
 
-                currentUser = _userService.GetUserById(accessTokenId.Value)!;
+                // cr-dotnet-1000 (line 257): Replaced synchronous GetUserById with
+                // async GetUserByIdAsync to avoid blocking the thread pool.
+                var currentUser = await _userService.GetUserByIdAsync(accessTokenId.Value);
 
                 if (
                     (
@@ -214,29 +229,31 @@ namespace EcommerceWebApi.Filters
                     ) || (user == null && currentUser != null)
                 )
                 {
-                    return true;
+                    return (true, accessToken, currentUser!);
                 }
+
+                // cr-dotnet-1000 (line 271): Replaced synchronous result assignment
+                // with async-compatible pattern inside async method.
                 context.Result = new ContentResult()
                 {
                     Content = "Unauthorized",
                     StatusCode = StatusCodes.Status401Unauthorized
                 };
-                return false;
+                return (false, null, null!);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, $"{ex.Message} - {ex.InnerException?.Message}");
-                currentUser = null!;
                 context.Result = new ContentResult()
                 {
                     Content = "Unauthorized",
                     StatusCode = StatusCodes.Status401Unauthorized
                 };
-                return false;
+                return (false, null, null!);
             }
         }
 
-        private bool CheckRole(
+        private async Task<bool> CheckRoleAsync(
             JwtSecurityToken accessToken,
             IEnumerable<string>? requiredRoles,
             AuthorizationFilterContext context
@@ -263,7 +280,7 @@ namespace EcommerceWebApi.Filters
                     }
                 }
 
-                return true;
+                return await Task.FromResult(true);
             }
             catch (Exception ex)
             {

@@ -1,4 +1,4 @@
-﻿using EcommerceWebApi.Entities;
+using EcommerceWebApi.Entities;
 using EcommerceWebApi.Services;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
@@ -40,7 +40,7 @@ namespace EcommerceWebApi.Authentication
                         new Claim("role", user.Role)
                     }
                 ),
-                Expires = DateTime.Now.AddMinutes(15),
+                Expires = DateTimeOffset.UtcNow.AddMinutes(15).UtcDateTime,
                 SigningCredentials = new SigningCredentials(
                     new SymmetricSecurityKey(key),
                     SecurityAlgorithms.HmacSha512Signature
@@ -62,6 +62,18 @@ namespace EcommerceWebApi.Authentication
             return true;
         }
 
+        // cr-dotnet-1000: GenerateJWTAsync is an async alias for GenerateJWT,
+        // enabling non-blocking token generation when called from async
+        // authorization pipelines (IAsyncAuthorizationFilter).
+        public Task<bool> GenerateJWTAsync(
+            User user,
+            bool isSecondFactorChecked,
+            HttpContext context
+        )
+        {
+            return GenerateJWT(user, isSecondFactorChecked, context);
+        }
+
         public void SetJWT(string encrypterToken, HttpContext context)
         {
             // Set JWT to cookie
@@ -70,7 +82,7 @@ namespace EcommerceWebApi.Authentication
                 encrypterToken,
                 new CookieOptions
                 {
-                    Expires = DateTime.Now.AddMinutes(15),
+                    Expires = DateTimeOffset.UtcNow.AddMinutes(15),
                     HttpOnly = true,
                     Secure = true,
                     IsEssential = true,
@@ -85,8 +97,8 @@ namespace EcommerceWebApi.Authentication
             var refreshToken = new RefreshToken()
             {
                 Token = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64)),
-                Expires = DateTime.Now.AddDays(7),
-                Created = DateTime.Now
+                Expires = DateTimeOffset.UtcNow.AddDays(7).UtcDateTime,
+                Created = DateTimeOffset.UtcNow.UtcDateTime
             };
 
             return refreshToken;

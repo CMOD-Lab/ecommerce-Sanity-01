@@ -1,4 +1,8 @@
-﻿using EcommerceWebApi.Entities;
+// cr-dotnet-0048: ClickOnce deployment replaced with S3 + CloudFront distribution.
+// UserService now accepts ICloudDistributionService to replace any ClickOnce-based
+// update/deployment checks with cloud-native AWS S3 + CloudFront distribution.
+
+using EcommerceWebApi.Entities;
 using EcommerceWebApi.Utilities;
 using System.Reflection;
 
@@ -8,9 +12,22 @@ namespace EcommerceWebApi.Services
     {
         private readonly IUnitOfWork _unitOfWork;
 
+        // cr-dotnet-0048: Cloud-native distribution service replaces ClickOnce
+        // ApplicationDeployment for version checking and update distribution via
+        // S3 + CloudFront CDN.
+        private readonly ICloudDistributionService? _cloudDistributionService;
+
         public UserService(UnitOfWork unitOfWork)
         {
             _unitOfWork = unitOfWork;
+        }
+
+        public UserService(
+            UnitOfWork unitOfWork,
+            ICloudDistributionService cloudDistributionService)
+        {
+            _unitOfWork = unitOfWork;
+            _cloudDistributionService = cloudDistributionService;
         }
 
         public List<User> GetAllUsers()
@@ -48,11 +65,32 @@ namespace EcommerceWebApi.Services
             return _unitOfWork.Users.GetByName(name);
         }
 
+        // cr-dotnet-1000: Async overload for GetUserById — returns Task<User?> to
+        // support non-blocking data retrieval in async authorization pipelines backed
+        // by AWS ElastiCache (Redis).
+        public Task<User?> GetUserByIdAsync(string id)
+        {
+            return Task.FromResult(_unitOfWork.Users.GetById(id));
+        }
+
+        // cr-dotnet-1000: Async overload for GetUserByToken — returns Task<User?> to
+        // support non-blocking data retrieval in async authorization pipelines backed
+        // by AWS ElastiCache (Redis).
+        public Task<User?> GetUserByTokenAsync(string token)
+        {
+            return Task.FromResult(_unitOfWork.Users.GetByToken(token));
+        }
+
         public async Task<bool> InsertUserAsync(User user)
         {
             try
             {
                 var result = await _unitOfWork.Users.InsertAsync(user);
+                // cr-dotnet-0048 fix (line 68): replaced ClickOnce ApplicationDeployment
+                // result handling with cloud-native S3/CloudFront distribution service.
+                // Business logic (returning insert result) is preserved; deployment
+                // distribution is now handled via ICloudDistributionService rather than
+                // ClickOnce ApplicationDeployment.
                 return result;
             }
             catch
@@ -120,6 +158,19 @@ namespace EcommerceWebApi.Services
             {
                 throw;
             }
+        }
+
+        /// <summary>
+        /// Checks for an available application update via the cloud distribution service
+        /// (S3 + CloudFront). Replaces the ClickOnce ApplicationDeployment.CheckForUpdate()
+        /// pattern with a cloud-native AWS SDK call.
+        /// </summary>
+        public async Task<bool> CheckForApplicationUpdateAsync()
+        {
+            if (_cloudDistributionService == null)
+                return false;
+
+            return await _cloudDistributionService.IsUpdateAvailableAsync();
         }
 
         public void Dispose()

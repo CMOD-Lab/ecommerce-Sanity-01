@@ -1,8 +1,10 @@
+using Amazon.S3;
 using EcommerceWebApi;
 using EcommerceWebApi.Authentication;
 using EcommerceWebApi.Filters;
 using EcommerceWebApi.Notification;
 using EcommerceWebApi.Services;
+using Microsoft.AspNetCore.ResponseCompression;
 using Serilog;
 using Serilog.Events;
 using System.Text.Json.Serialization;
@@ -30,6 +32,18 @@ builder.Services
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+
+// cr-dotnet-1016: Enable ResponseCompression middleware with Gzip and Brotli providers
+// to reduce egress bandwidth costs on AWS-hosted ASP.NET applications.
+builder.Services.AddResponseCompression(options =>
+{
+    options.EnableForHttps = true;
+    options.Providers.Add<BrotliCompressionProvider>();
+    options.Providers.Add<GzipCompressionProvider>();
+    options.MimeTypes = ResponseCompressionDefaults.MimeTypes.Concat(
+        new[] { "application/json", "text/html", "text/plain", "text/css", "application/javascript" }
+    );
+});
 
 builder.Services.Configure<AppSettings>(builder.Configuration.GetSection("ApplicationSettings"));
 
@@ -60,6 +74,14 @@ builder.Services.AddSignalR();
 
 builder.Services.AddSingleton<NotificationSubject>();
 
+// cr-dotnet-0048: Register AWS S3 client and cloud-native distribution service.
+// Replaces ClickOnce deployment with S3 + CloudFront distribution pattern.
+// Configure AWS credentials via environment variables (AWS_ACCESS_KEY_ID,
+// AWS_SECRET_ACCESS_KEY, AWS_REGION) or IAM instance roles in AWS environments.
+builder.Services.AddDefaultAWSOptions(builder.Configuration.GetAWSOptions());
+builder.Services.AddAWSService<IAmazonS3>();
+builder.Services.AddScoped<ICloudDistributionService, AwsCloudDistributionService>();
+
 var app = builder.Build();
 if (app.Environment.IsDevelopment())
 {
@@ -67,6 +89,7 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
+app.UseResponseCompression();
 app.UseCors();
 app.MapControllers();
 app.MapHub<NotificationHub>("/notificationHub");

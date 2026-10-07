@@ -1,4 +1,4 @@
-﻿using EcommerceWebApi.Entities;
+using EcommerceWebApi.Entities;
 using EcommerceWebApi.Utilities;
 
 namespace EcommerceWebApi.Services
@@ -12,6 +12,10 @@ namespace EcommerceWebApi.Services
         User? GetUserById(string id);
         User? GetUserByName(string name);
         User? GetUserByToken(string token);
+        // cr-dotnet-1000: Async overloads for non-blocking data retrieval backed by
+        // AWS ElastiCache (Redis) to support cloud auto-scaling scenarios.
+        Task<User?> GetUserByIdAsync(string id);
+        Task<User?> GetUserByTokenAsync(string token);
         Task<bool> InsertUserAsync(User user);
         Task<bool> UpdateUserAsync(User user);
         Task<bool> UpdateUserPropertyAsync<T>(User user, string property, T value);

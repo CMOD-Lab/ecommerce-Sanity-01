@@ -61,7 +61,8 @@ namespace EcommerceWebApi.Authentication
 
         public async Task<AuthResult> LoginSecondFactor(string totp, HttpContext context)
         {
-            bool validated = _totpService.ValidateTotp(
+            // cr-dotnet-0037: Use async ValidateTotpAsync to avoid blocking the thread pool
+            bool validated = await _totpService.ValidateTotpAsync(
                 base32Secret: CurrentUser.SecretCode,
                 totp: totp
             );
@@ -135,7 +136,8 @@ namespace EcommerceWebApi.Authentication
                 return AuthResult.InvalidCredentials;
             }
 
-            bool validated = _totpService.ValidateTotp(base32Secret: secret, totp: totp);
+            // cr-dotnet-0037: Use async ValidateTotpAsync to avoid blocking the thread pool
+            bool validated = await _totpService.ValidateTotpAsync(base32Secret: secret, totp: totp);
             if (!validated)
             {
                 return AuthResult.InvalidCredentials;
