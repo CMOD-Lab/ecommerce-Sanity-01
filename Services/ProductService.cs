@@ -1,4 +1,4 @@
-﻿using EcommerceWebApi.Entities;
+using EcommerceWebApi.Entities;
 using EcommerceWebApi.Notification;
 using EcommerceWebApi.Utilities;
 using System.Reflection;
@@ -18,7 +18,7 @@ namespace EcommerceWebApi.Services
         {
             try
             {
-                return _unitOfWork.Products.GetAll().AsQueryable().ToList();
+                return _unitOfWork.Products.GetAll().ToList();
             }
             catch
             {
@@ -28,7 +28,8 @@ namespace EcommerceWebApi.Services
 
         public int GetNextProductId()
         {
-            return _unitOfWork.Products.GetAll().GetNextIdValue();
+            var products = _unitOfWork.Products.GetAll().ToList();
+            return products.Any() ? products.Max(p => p.Id) + 1 : 1;
         }
 
         public List<Product> GetPaginationProducts(
@@ -74,6 +75,10 @@ namespace EcommerceWebApi.Services
             try
             {
                 var result = await _unitOfWork.Products.InsertAsync(product);
+                if (result)
+                {
+                    await _unitOfWork.SaveChangesAsync();
+                }
                 return result;
             }
             catch
@@ -87,6 +92,10 @@ namespace EcommerceWebApi.Services
             try
             {
                 var result = await _unitOfWork.Products.UpdateAsync(product);
+                if (result)
+                {
+                    await _unitOfWork.SaveChangesAsync();
+                }
                 return result;
             }
             catch
@@ -126,7 +135,10 @@ namespace EcommerceWebApi.Services
             try
             {
                 var result = await _unitOfWork.Products.DeleteAsync(id);
-                _unitOfWork.CommitTransaction();
+                if (result)
+                {
+                    await _unitOfWork.SaveChangesAsync();
+                }
                 return result;
             }
             catch

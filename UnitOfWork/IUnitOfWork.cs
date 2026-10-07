@@ -1,4 +1,4 @@
-﻿using EcommerceWebApi.Repositories;
+using EcommerceWebApi.Repositories;
 
 namespace EcommerceWebApi
 {
@@ -15,5 +15,9 @@ namespace EcommerceWebApi
         void AbortTransaction();
 
         bool IsTransactionInProgress();
+
+        Task<int> SaveChangesAsync();
+
+        int SaveChanges();
     }
 }

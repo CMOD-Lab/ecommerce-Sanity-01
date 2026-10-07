@@ -1,4 +1,4 @@
-﻿using EcommerceWebApi.Entities;
+using EcommerceWebApi.Entities;
 using EcommerceWebApi.Utilities;
 using System.Reflection;
 
@@ -17,7 +17,7 @@ namespace EcommerceWebApi.Services
         {
             try
             {
-                return _unitOfWork.Users.GetAll().AsQueryable().ToList();
+                return _unitOfWork.Users.GetAll().ToList();
             }
             catch
             {
@@ -53,6 +53,10 @@ namespace EcommerceWebApi.Services
             try
             {
                 var result = await _unitOfWork.Users.InsertAsync(user);
+                if (result)
+                {
+                    await _unitOfWork.SaveChangesAsync();
+                }
                 return result;
             }
             catch
@@ -66,6 +70,10 @@ namespace EcommerceWebApi.Services
             try
             {
                 var result = await _unitOfWork.Users.UpdateAsync(user);
+                if (result)
+                {
+                    await _unitOfWork.SaveChangesAsync();
+                }
                 return result;
             }
             catch
@@ -82,7 +90,10 @@ namespace EcommerceWebApi.Services
             }
             else
             {
-                user.RefreshToken.Token = null!;
+                if (user.RefreshToken != null)
+                {
+                    user.RefreshToken.Token = null;
+                }
             }
             return await UpdateUserAsync(user);
         }
@@ -114,6 +125,10 @@ namespace EcommerceWebApi.Services
             try
             {
                 var result = await _unitOfWork.Users.DeleteAsync(id);
+                if (result)
+                {
+                    await _unitOfWork.SaveChangesAsync();
+                }
                 return result;
             }
             catch

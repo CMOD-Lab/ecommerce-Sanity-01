@@ -1,12 +1,11 @@
-﻿using EcommerceWebApi.Entities;
-using JsonFlatFileDataStore;
+using EcommerceWebApi.Entities;
 
 namespace EcommerceWebApi.Repositories
 {
     public interface IUserRepository
     {
         Task<bool> DeleteAsync(string id);
-        IDocumentCollection<User> GetAll();
+        IQueryable<User> GetAll();
         User? GetById(string id);
         User? GetByName(string name);
         User? GetByToken(string token);

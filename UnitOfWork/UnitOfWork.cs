@@ -1,12 +1,13 @@
-﻿using EcommerceWebApi.Repositories;
-using JsonFlatFileDataStore;
+using EcommerceWebApi.Data;
+using EcommerceWebApi.Repositories;
+using Microsoft.EntityFrameworkCore.Storage;
 
 namespace EcommerceWebApi
 {
     public class UnitOfWork : IUnitOfWork
     {
-        private readonly DataStore _store;
-        private ChangeSet? _currentTransaction;
+        private readonly AppDbContext _context;
+        private IDbContextTransaction? _currentTransaction;
         private bool _disposed = false;
 
         public IUserRepository Users { get; private set; }
@@ -15,12 +16,12 @@ namespace EcommerceWebApi
 
         public IOrderRepository Orders { get; private set; }
 
-        public UnitOfWork()
+        public UnitOfWork(AppDbContext context)
         {
-            _store = new DataStore("database.json");
-            Users = new UserRepository(this, _store);
-            Products = new ProductRepository(this, _store);
-            Orders = new OrderRepository(this, _store);
+            _context = context;
+            Users = new UserRepository(_context);
+            Products = new ProductRepository(_context);
+            Orders = new OrderRepository(_context);
         }
 
         public bool IsTransactionInProgress()
@@ -35,7 +36,7 @@ namespace EcommerceWebApi
                 throw new InvalidOperationException("A transaction is already in progress.");
             }
 
-            _currentTransaction = new ChangeSet();
+            _currentTransaction = _context.Database.BeginTransaction();
         }
 
         public void CommitTransaction()
@@ -45,32 +46,49 @@ namespace EcommerceWebApi
                 throw new InvalidOperationException("No transaction in progress.");
             }
 
-            foreach (var action in _currentTransaction.Actions)
+            try
             {
-                action();
+                _context.SaveChanges();
+                _currentTransaction.Commit();
             }
-
-            _currentTransaction = null;
+            catch
+            {
+                AbortTransaction();
+                throw;
+            }
+            finally
+            {
+                _currentTransaction?.Dispose();
+                _currentTransaction = null;
+            }
         }
 
         public void AbortTransaction()
         {
             if (_currentTransaction == null)
             {
-                throw new InvalidOperationException("No transaction in progress.");
+                return;
             }
 
-            _currentTransaction = null;
+            try
+            {
+                _currentTransaction.Rollback();
+            }
+            finally
+            {
+                _currentTransaction?.Dispose();
+                _currentTransaction = null;
+            }
         }
 
-        internal void AddToTransaction(Action action)
+        public async Task<int> SaveChangesAsync()
         {
-            if (_currentTransaction == null)
-            {
-                throw new InvalidOperationException("No transaction in progress.");
-            }
+            return await _context.SaveChangesAsync();
+        }
 
-            _currentTransaction.Actions.Add(action);
+        public int SaveChanges()
+        {
+            return _context.SaveChanges();
         }
 
         protected virtual void Dispose(bool disposing)
@@ -79,7 +97,8 @@ namespace EcommerceWebApi
             {
                 if (disposing)
                 {
-                    _store?.Dispose();
+                    _currentTransaction?.Dispose();
+                    _context?.Dispose();
                 }
 
                 _disposed = true;
@@ -96,10 +115,5 @@ namespace EcommerceWebApi
         {
             Dispose(false);
         }
-    }
-
-    public class ChangeSet
-    {
-        public List<Action> Actions { get; } = new List<Action>();
     }
 }

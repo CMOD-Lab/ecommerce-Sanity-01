@@ -1,24 +1,23 @@
-﻿using EcommerceWebApi.Entities;
-using JsonFlatFileDataStore;
+using EcommerceWebApi.Data;
+using EcommerceWebApi.Entities;
+using Microsoft.EntityFrameworkCore;
 
 namespace EcommerceWebApi.Repositories
 {
     public class OrderRepository : IOrderRepository
     {
-        private readonly UnitOfWork _unitOfWork;
-        private readonly DataStore _store;
+        private readonly AppDbContext _context;
 
-        public OrderRepository(UnitOfWork unitOfWork, DataStore store)
+        public OrderRepository(AppDbContext context)
         {
-            _unitOfWork = unitOfWork;
-            _store = store;
+            _context = context;
         }
 
-        public IDocumentCollection<Order> GetAll()
+        public IQueryable<Order> GetAll()
         {
             try
             {
-                return _store.GetCollection<Order>();
+                return _context.Orders.AsQueryable();
             }
             catch
             {
@@ -30,7 +29,7 @@ namespace EcommerceWebApi.Repositories
         {
             try
             {
-                return GetAll().AsQueryable().FirstOrDefault(x => x.Id == id);
+                return _context.Orders.FirstOrDefault(x => x.Id == id);
             }
             catch
             {
@@ -38,19 +37,12 @@ namespace EcommerceWebApi.Repositories
             }
         }
 
-        public Task<bool> InsertAsync(Order order)
+        public async Task<bool> InsertAsync(Order order)
         {
             try
             {
-                if (_unitOfWork.IsTransactionInProgress())
-                {
-                    _unitOfWork.AddToTransaction(() => GetAll().InsertOne(order));
-                    return Task.FromResult(true);
-                }
-                else
-                {
-                    return GetAll().InsertOneAsync(order);
-                }
+                await _context.Orders.AddAsync(order);
+                return true;
             }
             catch
             {
@@ -58,19 +50,12 @@ namespace EcommerceWebApi.Repositories
             }
         }
 
-        public Task<bool> UpdateAsync(Order order)
+        public async Task<bool> UpdateAsync(Order order)
         {
             try
             {
-                if (_unitOfWork.IsTransactionInProgress())
-                {
-                    _unitOfWork.AddToTransaction(() => GetAll().UpdateOne(order.Id, order));
-                    return Task.FromResult(true);
-                }
-                else
-                {
-                    return GetAll().UpdateOneAsync(order.Id, order);
-                }
+                _context.Orders.Update(order);
+                return await Task.FromResult(true);
             }
             catch
             {
@@ -78,19 +63,14 @@ namespace EcommerceWebApi.Repositories
             }
         }
 
-        public Task<bool> DeleteAsync(string id)
+        public async Task<bool> DeleteAsync(string id)
         {
             try
             {
-                if (_unitOfWork.IsTransactionInProgress())
-                {
-                    _unitOfWork.AddToTransaction(() => GetAll().DeleteOne(id));
-                    return Task.FromResult(true);
-                }
-                else
-                {
-                    return GetAll().DeleteOneAsync(id);
-                }
+                var order = await _context.Orders.FindAsync(id);
+                if (order == null) return false;
+                _context.Orders.Remove(order);
+                return true;
             }
             catch
             {

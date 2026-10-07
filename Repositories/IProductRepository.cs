@@ -1,12 +1,11 @@
-﻿using EcommerceWebApi.Entities;
-using JsonFlatFileDataStore;
+using EcommerceWebApi.Entities;
 
 namespace EcommerceWebApi.Repositories
 {
     public interface IProductRepository
     {
         Task<bool> DeleteAsync(int id);
-        IDocumentCollection<Product> GetAll();
+        IQueryable<Product> GetAll();
         Product? GetById(int id);
         Task<bool> InsertAsync(Product product);
         Task<bool> UpdateAsync(Product product);

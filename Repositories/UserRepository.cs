@@ -1,24 +1,23 @@
-﻿using EcommerceWebApi.Entities;
-using JsonFlatFileDataStore;
+using EcommerceWebApi.Data;
+using EcommerceWebApi.Entities;
+using Microsoft.EntityFrameworkCore;
 
 namespace EcommerceWebApi.Repositories
 {
     public class UserRepository : IUserRepository
     {
-        private readonly UnitOfWork _unitOfWork;
-        private readonly DataStore _store;
+        private readonly AppDbContext _context;
 
-        public UserRepository(UnitOfWork unitOfWork, DataStore store)
+        public UserRepository(AppDbContext context)
         {
-            _unitOfWork = unitOfWork;
-            _store = store;
+            _context = context;
         }
 
-        public IDocumentCollection<User> GetAll()
+        public IQueryable<User> GetAll()
         {
             try
             {
-                return _store.GetCollection<User>();
+                return _context.Users.Include(u => u.RefreshToken).AsQueryable();
             }
             catch
             {
@@ -30,7 +29,9 @@ namespace EcommerceWebApi.Repositories
         {
             try
             {
-                return GetAll().AsQueryable().FirstOrDefault(x => x.Id == id);
+                return _context.Users
+                    .Include(u => u.RefreshToken)
+                    .FirstOrDefault(x => x.Id == id);
             }
             catch
             {
@@ -42,7 +43,9 @@ namespace EcommerceWebApi.Repositories
         {
             try
             {
-                return GetAll().AsQueryable().FirstOrDefault(x => x.RefreshToken.Token == token);
+                return _context.Users
+                    .Include(u => u.RefreshToken)
+                    .FirstOrDefault(x => x.RefreshToken != null && x.RefreshToken.Token == token);
             }
             catch
             {
@@ -54,7 +57,9 @@ namespace EcommerceWebApi.Repositories
         {
             try
             {
-                return GetAll().AsQueryable().FirstOrDefault(x => x.Username == name);
+                return _context.Users
+                    .Include(u => u.RefreshToken)
+                    .FirstOrDefault(x => x.Username == name);
             }
             catch
             {
@@ -62,19 +67,12 @@ namespace EcommerceWebApi.Repositories
             }
         }
 
-        public Task<bool> InsertAsync(User user)
+        public async Task<bool> InsertAsync(User user)
         {
             try
             {
-                if (_unitOfWork.IsTransactionInProgress())
-                {
-                    _unitOfWork.AddToTransaction(() => GetAll().InsertOne(user));
-                    return Task.FromResult(true);
-                }
-                else
-                {
-                    return GetAll().InsertOneAsync(user);
-                }
+                await _context.Users.AddAsync(user);
+                return true;
             }
             catch
             {
@@ -82,19 +80,12 @@ namespace EcommerceWebApi.Repositories
             }
         }
 
-        public Task<bool> UpdateAsync(User user)
+        public async Task<bool> UpdateAsync(User user)
         {
             try
             {
-                if (_unitOfWork.IsTransactionInProgress())
-                {
-                    _unitOfWork.AddToTransaction(() => GetAll().UpdateOne(user.Id, user));
-                    return Task.FromResult(true);
-                }
-                else
-                {
-                    return GetAll().UpdateOneAsync(user.Id, user);
-                }
+                _context.Users.Update(user);
+                return await Task.FromResult(true);
             }
             catch
             {
@@ -102,19 +93,14 @@ namespace EcommerceWebApi.Repositories
             }
         }
 
-        public Task<bool> DeleteAsync(string id)
+        public async Task<bool> DeleteAsync(string id)
         {
             try
             {
-                if (_unitOfWork.IsTransactionInProgress())
-                {
-                    _unitOfWork.AddToTransaction(() => GetAll().DeleteOne(id));
-                    return Task.FromResult(true);
-                }
-                else
-                {
-                    return GetAll().DeleteOneAsync(id);
-                }
+                var user = await _context.Users.FindAsync(id);
+                if (user == null) return false;
+                _context.Users.Remove(user);
+                return true;
             }
             catch
             {

@@ -53,7 +53,7 @@ namespace EcommerceWebApi.Services
             {
                 var product = products[pair.Key];
                 product.Quantity -= pair.Value;
-                await _productService.UpdateProductAsync(product);
+                await _unitOfWork.Products.UpdateAsync(product);
             }
 
             return order;
@@ -69,7 +69,7 @@ namespace EcommerceWebApi.Services
                     return OrderResult.ProductNotFound;
                 }
                 product.Quantity += pair.Value;
-                await _productService.UpdateProductAsync(product);
+                await _unitOfWork.Products.UpdateAsync(product);
             }
             return OrderResult.Success;
         }
@@ -78,7 +78,7 @@ namespace EcommerceWebApi.Services
         {
             try
             {
-                return _unitOfWork.Orders.GetAll().AsQueryable().ToList();
+                return _unitOfWork.Orders.GetAll().ToList();
             }
             catch
             {
@@ -155,6 +155,10 @@ namespace EcommerceWebApi.Services
             try
             {
                 var result = await _unitOfWork.Orders.UpdateAsync(order);
+                if (result)
+                {
+                    await _unitOfWork.SaveChangesAsync();
+                }
                 return result ? OrderResult.Success : OrderResult.Fail;
             }
             catch
@@ -210,9 +214,9 @@ namespace EcommerceWebApi.Services
                         return fillResult;
                     }
                 }
-                var result = await UpdateOrderAsync(order);
+                var result = await _unitOfWork.Orders.UpdateAsync(order);
 
-                if (result == OrderResult.Success)
+                if (result)
                 {
                     _unitOfWork.CommitTransaction();
                     return OrderResult.Success;
@@ -238,6 +242,7 @@ namespace EcommerceWebApi.Services
                 var order = GetOrderById(id);
                 if (order == null)
                 {
+                    _unitOfWork.AbortTransaction();
                     return OrderResult.ProductNotFound;
                 }
 
