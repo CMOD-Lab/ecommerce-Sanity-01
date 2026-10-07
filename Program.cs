@@ -1,8 +1,10 @@
+using Amazon.S3;
 using EcommerceWebApi;
 using EcommerceWebApi.Authentication;
 using EcommerceWebApi.Filters;
 using EcommerceWebApi.Notification;
 using EcommerceWebApi.Services;
+using Microsoft.AspNetCore.ResponseCompression;
 using Serilog;
 using Serilog.Events;
 using System.Text.Json.Serialization;
@@ -31,6 +33,18 @@ builder.Services
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
+// Enable response compression with Gzip and Brotli to reduce AWS egress bandwidth costs
+builder.Services.AddResponseCompression(options =>
+{
+    options.EnableForHttps = true;
+    options.Providers.Add<BrotliCompressionProvider>();
+    options.Providers.Add<GzipCompressionProvider>();
+    options.MimeTypes = ResponseCompressionDefaults.MimeTypes.Concat(
+        new[] { "text/html", "application/json", "text/plain", "text/css", "application/javascript" });
+});
+builder.Services.Configure<BrotliCompressionProviderOptions>(options => options.Level = System.IO.Compression.CompressionLevel.Fastest);
+builder.Services.Configure<GzipCompressionProviderOptions>(options => options.Level = System.IO.Compression.CompressionLevel.SmallestSize);
+
 builder.Services.Configure<AppSettings>(builder.Configuration.GetSection("ApplicationSettings"));
 
 builder.Services.AddCors(options =>
@@ -44,6 +58,12 @@ builder.Services.AddCors(options =>
             .AllowCredentials();
     });
 });
+
+// Register AWS S3 client (credentials resolved from environment / IAM role / AWS SDK chain)
+builder.Services.AddAWSService<IAmazonS3>();
+
+// Register S3 + CloudFront update service — replaces ClickOnce deployment distribution
+builder.Services.AddSingleton<IApplicationUpdateService, S3CloudFrontUpdateService>();
 
 builder.Services.AddScoped<UnitOfWork>();
 
@@ -67,6 +87,7 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
+app.UseResponseCompression();
 app.UseCors();
 app.MapControllers();
 app.MapHub<NotificationHub>("/notificationHub");

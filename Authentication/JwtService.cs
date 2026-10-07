@@ -1,4 +1,4 @@
-﻿using EcommerceWebApi.Entities;
+using EcommerceWebApi.Entities;
 using EcommerceWebApi.Services;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
@@ -40,7 +40,8 @@ namespace EcommerceWebApi.Authentication
                         new Claim("role", user.Role)
                     }
                 ),
-                Expires = DateTime.Now.AddMinutes(15),
+                // cr-dotnet-0121: Replaced DateTime.Now with DateTimeOffset.UtcNow for cloud-safe UTC timestamps
+                Expires = DateTimeOffset.UtcNow.AddMinutes(15).UtcDateTime,
                 SigningCredentials = new SigningCredentials(
                     new SymmetricSecurityKey(key),
                     SecurityAlgorithms.HmacSha512Signature
@@ -70,7 +71,8 @@ namespace EcommerceWebApi.Authentication
                 encrypterToken,
                 new CookieOptions
                 {
-                    Expires = DateTime.Now.AddMinutes(15),
+                    // cr-dotnet-0121: Replaced DateTime.Now with DateTimeOffset.UtcNow for cloud-safe UTC timestamps
+                    Expires = DateTimeOffset.UtcNow.AddMinutes(15),
                     HttpOnly = true,
                     Secure = true,
                     IsEssential = true,
@@ -82,11 +84,12 @@ namespace EcommerceWebApi.Authentication
         private static RefreshToken GenerateRefreshToken()
         {
             // Create refresh token
+            // cr-dotnet-0121: Replaced DateTime.Now with DateTimeOffset.UtcNow for cloud-safe UTC timestamps
             var refreshToken = new RefreshToken()
             {
                 Token = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64)),
-                Expires = DateTime.Now.AddDays(7),
-                Created = DateTime.Now
+                Expires = DateTimeOffset.UtcNow.AddDays(7).UtcDateTime,
+                Created = DateTimeOffset.UtcNow.UtcDateTime
             };
 
             return refreshToken;

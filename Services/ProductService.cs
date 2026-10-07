@@ -1,17 +1,27 @@
-﻿using EcommerceWebApi.Entities;
+using EcommerceWebApi.Entities;
 using EcommerceWebApi.Notification;
 using EcommerceWebApi.Utilities;
 using System.Reflection;
 
 namespace EcommerceWebApi.Services
 {
+    /// <summary>
+    /// Handles product business logic.
+    /// Application distribution and update checking is handled via AWS S3 + CloudFront
+    /// through <see cref="IApplicationUpdateService"/>, replacing the former ClickOnce
+    /// deployment model.
+    /// </summary>
     public class ProductService : IProductService
     {
         private readonly IUnitOfWork _unitOfWork;
+        // Replaces ClickOnce ApplicationDeployment.CurrentDeployment update checks:
+        // version checking and package distribution are now handled by S3 + CloudFront.
+        private readonly IApplicationUpdateService _updateService;
 
-        public ProductService(UnitOfWork unitOfWork)
+        public ProductService(UnitOfWork unitOfWork, IApplicationUpdateService updateService)
         {
             _unitOfWork = unitOfWork;
+            _updateService = updateService;
         }
 
         public List<Product> GetAllProducts()

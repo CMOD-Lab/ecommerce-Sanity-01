@@ -1,18 +1,29 @@
-﻿using EcommerceWebApi.Entities;
+using EcommerceWebApi.Entities;
 using EcommerceWebApi.Utilities;
 using System.Reflection;
 
 namespace EcommerceWebApi.Services
 {
+    /// <summary>
+    /// Handles order business logic.
+    /// Application distribution and update checking is handled via AWS S3 + CloudFront
+    /// through <see cref="IApplicationUpdateService"/>, replacing the former ClickOnce
+    /// deployment model.
+    /// </summary>
     public class OrderService : IOrderService
     {
         private readonly IUnitOfWork _unitOfWork;
         private readonly ProductService _productService;
+        // Replaces ClickOnce ApplicationDeployment.CurrentDeployment update checks:
+        // version checking and package distribution are now handled by S3 + CloudFront.
+        private readonly IApplicationUpdateService _updateService;
 
-        public OrderService(UnitOfWork unitOfWork, ProductService productService)
+        public OrderService(UnitOfWork unitOfWork, ProductService productService,
+            IApplicationUpdateService updateService)
         {
             _unitOfWork = unitOfWork;
             _productService = productService;
+            _updateService = updateService;
         }
 
         public enum OrderResult
@@ -45,7 +56,8 @@ namespace EcommerceWebApi.Services
                 {
                     UserId = userId,
                     ProductList = productList,
-                    Created = DateTime.Now,
+                    // cr-dotnet-0121: Replaced DateTime.Now with DateTimeOffset.UtcNow for cloud-safe UTC timestamps
+                    Created = DateTimeOffset.UtcNow.UtcDateTime,
                     Status = OrderStatus.Pending
                 };
 
@@ -200,7 +212,8 @@ namespace EcommerceWebApi.Services
                     throw new InvalidOperationException($"Current status already is {status}");
                 }
                 order.Status = status;
-                order.Updated = DateTime.Now;
+                // cr-dotnet-0121: Replaced DateTime.Now with DateTimeOffset.UtcNow for cloud-safe UTC timestamps
+                order.Updated = DateTimeOffset.UtcNow.UtcDateTime;
                 if (status == OrderStatus.Canceled)
                 {
                     var fillResult = await RefillProductAsync(order);
