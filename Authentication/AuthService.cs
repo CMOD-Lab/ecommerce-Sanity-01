@@ -11,6 +11,14 @@ namespace EcommerceWebApi.Authentication
         private readonly IJwtService _jwtService;
         public User CurrentUser { get; internal set; } = null!;
 
+        // Protected constructor for testing
+        protected internal AuthService(IUserService userService, ITotpService totpService, IJwtService jwtService)
+        {
+            _userService = userService;
+            _totpService = totpService;
+            _jwtService = jwtService;
+        }
+
         public AuthService(UserService userService, TotpService totpService, JwtService jwtService)
         {
             _userService = userService;

@@ -9,6 +9,13 @@ namespace EcommerceWebApi.Services
         private readonly IUnitOfWork _unitOfWork;
         private readonly ProductService _productService;
 
+        // Protected constructor for testing
+        protected internal OrderService(IUnitOfWork unitOfWork, ProductService productService)
+        {
+            _unitOfWork = unitOfWork;
+            _productService = productService;
+        }
+
         public OrderService(UnitOfWork unitOfWork, ProductService productService)
         {
             _unitOfWork = unitOfWork;
